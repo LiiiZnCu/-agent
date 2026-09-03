@@ -1500,7 +1500,7 @@ function Workspace() {
     <main className="app-shell">
       <header className="top-bar">
         <div className="brand-lockup">
-          <div className="brand-mark header-mark" role="img" aria-label="Canvas Relay"><span /><span /><span /></div>
+          <div className="brand-mark header-mark" role="img" aria-label="Mural logo"><span /><span /><span /></div>
           <div className="board-title-wrap">
             <input
               value={nameDraft}
