@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Deploy Canvas Relay beside Beacon, behind the existing CloudPanel nginx.
+set -euo pipefail
+
+HOST="${AIMURAL_DEPLOY_HOST:-root@beacon.300robots.com}"
+REMOTE_DIR="${AIMURAL_REMOTE_DIR:-/srv/aimural}"
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+printf '\n1/4  checking host and loopback port\n'
+ssh -o BatchMode=yes "$HOST" 'docker --version >/dev/null; if ss -ltnH | awk "{print \$4}" | grep -qE "(^|:)46731$" && ! docker ps --format "{{.Names}}" | grep -qx aimural-app; then echo "port 46731 is already occupied" >&2; exit 1; fi'
+
+printf '\n2/4  syncing application to %s:%s\n' "$HOST" "$REMOTE_DIR"
+ssh -o BatchMode=yes "$HOST" "mkdir -p '$REMOTE_DIR'"
+rsync -az --delete \
+  --exclude '.git' \
+  --exclude 'node_modules' \
+  --exclude 'dist' \
+  --exclude 'data/*.sqlite*' \
+  --exclude 'demo-*.png' \
+  ./ "$HOST:$REMOTE_DIR/"
+
+printf '\n3/4  building and starting isolated compose project\n'
+ssh -o BatchMode=yes "$HOST" "cd '$REMOTE_DIR' && docker compose -f deploy/docker-compose.host.yml up -d --build --remove-orphans"
+
+printf '\n4/4  waiting for health\n'
+ssh -o BatchMode=yes "$HOST" "for attempt in \$(seq 1 40); do if curl -fsS http://127.0.0.1:46731/api/health >/dev/null; then docker inspect --format '{{.State.Health.Status}}' aimural-app; exit 0; fi; sleep 2; done; docker logs --tail 100 aimural-app; exit 1"
+
+printf '\ndeployed application process -> http://127.0.0.1:46731\n'

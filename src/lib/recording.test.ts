@@ -1,7 +1,63 @@
 import { describe, expect, it } from 'vitest'
-import { appendEvent, completeRecording, createRecordingSession, recordingToCsv, recordingToMarkdown } from './recording'
+import { addRecordingCheckpoint, appendEvent, completeRecording, createRecordingSession, deleteRecordingCheckpoint, joinRecording, moderateRecording, recordingToCsv, recordingToMarkdown, renameRecordingCheckpoint, setRecordingFocus, watchRecording } from './recording'
 
 describe('multi-agent recording', () => {
+  it('assigns moderation to the agent that creates the session', () => {
+    const session = createRecordingSession('Moderated', { id: 'agent-moderator', name: 'Moderator', role: 'agent' }, 'mural-uuid')
+    expect(session.moderatorId).toBe('agent-moderator')
+    expect(session.boardId).toBe('mural-uuid')
+    expect(session.participants[0].status).toBe('active')
+  })
+
+  it('lets only the creator mute and reactivate another participant', () => {
+    let session = createRecordingSession('Moderated', { id: 'agent-moderator', name: 'Moderator', role: 'agent' }, 'mural-uuid')
+    session = joinRecording(session, { id: 'agent-risky', name: 'Risky', role: 'agent' })
+    expect(() => moderateRecording(session, 'agent-risky', true, 'agent-risky')).toThrow('Only the session moderator')
+    session = moderateRecording(session, 'agent-risky', true, 'agent-moderator')
+    expect(session.participants.find((participant) => participant.id === 'agent-risky')?.status).toBe('muted')
+    expect(session.events.at(-1)?.content).toContain('muted by the moderator')
+    session = moderateRecording(session, 'agent-risky', false, 'agent-moderator')
+    expect(session.participants.find((participant) => participant.id === 'agent-risky')?.status).toBe('active')
+  })
+
+  it('renews a scoped watch lease without reactivating a muted agent', () => {
+    let session = createRecordingSession('Watch', { id: 'agent-moderator', name: 'Moderator', role: 'agent' }, 'mural-uuid')
+    session = joinRecording(session, { id: 'agent-watcher', name: 'Watcher', role: 'agent' })
+    session = moderateRecording(session, 'agent-watcher', true, 'agent-moderator')
+    session = watchRecording(session, 'agent-watcher', ['element-a'])
+    const watcher = session.participants.find((participant) => participant.id === 'agent-watcher')!
+    expect(watcher.status).toBe('muted')
+    expect(watcher.watchingElementIds).toEqual(['element-a'])
+    expect(new Date(watcher.leaseExpiresAt!).getTime()).toBeGreaterThan(new Date(watcher.lastSeenAt!).getTime())
+  })
+
+  it('assigns distinct agent colors and prevents conflicting edit focus', () => {
+    let session = createRecordingSession('Focus', undefined, 'mural-uuid')
+    session = joinRecording(session, { id: 'one', name: 'One', role: 'agent' })
+    session = joinRecording(session, { id: 'two', name: 'Two', role: 'agent' })
+    expect(session.participants.find((participant) => participant.id === 'one')?.color).not.toBe(session.participants.find((participant) => participant.id === 'two')?.color)
+    const now = new Date()
+    session = setRecordingFocus(session, 'one', {
+      state: 'editing', intent: 'Rewrite', elementIds: ['idea-1'], claimedAt: now.toISOString(),
+      leaseExpiresAt: new Date(now.getTime() + 30_000).toISOString(), releaseOnAction: 'after_write',
+    })
+    expect(() => setRecordingFocus(session, 'two', {
+      state: 'editing', intent: 'Also rewrite', elementIds: ['idea-1'], claimedAt: now.toISOString(),
+      leaseExpiresAt: new Date(now.getTime() + 30_000).toISOString(), releaseOnAction: 'manual',
+    })).toThrow('already editing')
+  })
+
+  it('stores editable replay checkpoints without changing the live board', () => {
+    const board = { id: 'mural-uuid', name: 'Replay', nodes: [], edges: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+    let session = addRecordingCheckpoint(createRecordingSession('Replay', undefined, board.id), 'First pass', board)
+    const checkpointId = session.events.at(-1)!.id
+    expect(session.events.at(-1)?.checkpoint?.board).toEqual(board)
+    session = renameRecordingCheckpoint(session, checkpointId, 'Research complete')
+    expect(session.events.at(-1)?.checkpoint?.label).toBe('Research complete')
+    session = deleteRecordingCheckpoint(session, checkpointId)
+    expect(session.events.some((event) => event.id === checkpointId)).toBe(false)
+  })
+
   it('tracks participants, replies, and decisions in order', () => {
     let session = createRecordingSession('Launch brainstorm')
     session = appendEvent(session, {
@@ -27,7 +83,12 @@ describe('multi-agent recording', () => {
   it('finalizes and exports the deliberation with the board', () => {
     const completed = completeRecording(createRecordingSession(), 'Test both interviews and behavior data.')
     const markdown = recordingToMarkdown(completed, {
-      name: 'Launch board', nodes: [], edges: [], updatedAt: new Date().toISOString(),
+      id: '23a683bd-a7ac-47a4-afc4-7cfb93ecf781',
+      name: 'Launch board',
+      nodes: [],
+      edges: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     })
     expect(completed.status).toBe('complete')
     expect(markdown).toContain('## Deliberation timeline')

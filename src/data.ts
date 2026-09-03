@@ -116,15 +116,19 @@ export const INITIAL_EDGES: BoardEdge[] = [
 ]
 
 export const INITIAL_SNAPSHOT: BoardSnapshot = {
+  id: '84571348-85fd-4d40-8b9e-fac16fac2ecf',
   name: 'Better hybrid rituals',
   nodes: INITIAL_NODES,
   edges: INITIAL_EDGES,
-  updatedAt: new Date().toISOString(),
+  createdAt: '2026-09-03T12:00:00.000Z',
+  updatedAt: '2026-09-03T12:00:00.000Z',
 }
 
 export const EMPTY_SNAPSHOT: BoardSnapshot = {
+  id: '24aacdaa-53ec-4d20-b0ea-835dbb7c5f6c',
   name: 'Untitled brainstorm',
   nodes: [],
   edges: [],
-  updatedAt: new Date().toISOString(),
+  createdAt: '2026-09-03T12:00:00.000Z',
+  updatedAt: '2026-09-03T12:00:00.000Z',
 }

@@ -1,0 +1,29 @@
+name: aimural
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: aimural:local
+    container_name: aimural-app
+    environment:
+      NODE_ENV: production
+      CANVAS_RELAY_PORT: 5174
+      CANVAS_RELAY_DB_PATH: /app/data/canvas-relay.sqlite
+      CANVAS_RELAY_PUBLIC_URL: https://aimural.300robots.com
+    ports:
+      - "127.0.0.1:${AIMURAL_HOST_PORT:-46731}:5174"
+    volumes:
+      - aimural_data:/app/data
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  aimural_data:

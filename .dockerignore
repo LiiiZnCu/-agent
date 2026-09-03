@@ -1,0 +1,9 @@
+.git
+.gitignore
+.DS_Store
+.codex
+node_modules
+dist
+data/*.sqlite*
+demo-*.png
+*.log

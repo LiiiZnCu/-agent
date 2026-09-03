@@ -20,25 +20,31 @@ import {
   ArrowCounterClockwise,
   BracketsCurly,
   CaretDown,
+  ClockCounterClockwise,
   DownloadSimple,
   Moon,
   Record,
-  Robot,
   Rows,
+  ShareNetwork,
   SidebarSimple,
   Sun,
 } from '@phosphor-icons/react'
 import './index.css'
-import { AgentPanel } from './components/AgentPanel'
+import { AgentPanel, type AgentPanelView } from './components/AgentPanel'
+import { BoardLibraryMenu } from './components/BoardLibraryMenu'
 import { BoardElement } from './components/BoardElement'
+import { CollaborationDock } from './components/CollaborationDock'
+import { ConfirmModal } from './components/ConfirmModal'
 import { Inspector } from './components/Inspector'
+import { LayerMenu } from './components/LayerMenu'
+import { ShareModal } from './components/ShareModal'
 import { ToolRail } from './components/ToolRail'
-import { EMPTY_SNAPSHOT, INITIAL_SNAPSHOT } from './data'
+import { INITIAL_SNAPSHOT } from './data'
 import { createArtifactTemplate, validateArtifactSpec } from './lib/artifacts'
-import { arrangeNodes, calculateClusterBounds, createBoardEdge, createBoardNode, createId, serializeSnapshot } from './lib/board'
-import { loadBoard, saveBoard } from './lib/storage'
-import { getBackendHealth, syncRecording } from './lib/api'
-import { appendEvent, completeRecording, createRecordingSession, joinRecording, loadRecording, recordingToCsv, recordingToMarkdown, saveRecording } from './lib/recording'
+import { arrangeGroupNodes, arrangeNodes, calculateClusterBounds, createBoardEdge, createBoardNode, createEmptyBoard, createId, createUUID, moveNodeLayer, serializeSnapshot } from './lib/board'
+import { importCanvasRelay, listBoards, loadBoard, loadBoardById, saveBoard } from './lib/storage'
+import { assertHostedWritable, createAgentInvites as createHostedAgentInvites, createHostedMural as createHostedMuralApi, createUserShare as createHostedUserShare, getBackendHealth, loadHostedMural, redeemAgentInvite as redeemHostedAgentInvite, saveHostedMural, setHostedFocus, syncRecording } from './lib/api'
+import { activeFocusParticipants, addRecordingCheckpoint, appendEvent, completeRecording, createRecordingSession, deleteRecordingCheckpoint, joinRecording, loadRecording, moderateRecording, recordingToCsv, recordingToMarkdown, renameRecordingCheckpoint, saveRecording, setRecordingFocus, watchRecording } from './lib/recording'
 import { registerWebMCP, TOOL_CATALOG } from './lib/webmcp'
 import type {
   Activity,
@@ -48,7 +54,10 @@ import type {
   BoardEdge,
   BoardNode,
   BoardSnapshot,
+  BoardSummary,
   ElementKind,
+  LayerAction,
+  MuralFocusClaim,
   RecordingActions,
   RecordingSession,
 } from './types'
@@ -59,15 +68,60 @@ function copySnapshot(snapshot: BoardSnapshot): BoardSnapshot {
   return structuredClone(snapshot)
 }
 
+function nodeSyncVersion(node: BoardNode) {
+  return typeof node.data._syncVersion === 'string' ? node.data._syncVersion : ''
+}
+
+function edgeSyncVersion(edge: BoardEdge) {
+  const data = edge.data as Record<string, unknown> | undefined
+  return typeof data?._syncVersion === 'string' ? data._syncVersion : ''
+}
+
+function comparableNode(node: BoardNode) {
+  const { selected: _selected, dragging: _dragging, measured: _measured, ...stable } = node
+  const { _syncVersion, justCreated: _justCreated, ...data } = stable.data
+  return { ...stable, data }
+}
+
 function Workspace() {
-  const initial = useMemo(() => loadBoard(INITIAL_SNAPSHOT), [])
+  const [initial] = useState<BoardSnapshot>(() => {
+    const requestedId = new URLSearchParams(window.location.search).get('mural')
+    if (!requestedId) return loadBoard(INITIAL_SNAPSHOT)
+    const local = loadBoardById(requestedId)
+    if (local) return local
+    const placeholder = createEmptyBoard('Opening shared mural')
+    return { ...placeholder, id: requestedId }
+  })
+  const [boardId, setBoardId] = useState(initial.id)
+  const [boardCreatedAt, setBoardCreatedAt] = useState(initial.createdAt)
   const [name, setName] = useState(initial.name)
+  const [nameDraft, setNameDraft] = useState(initial.name)
   const [nodes, setNodes] = useState<BoardNode[]>(initial.nodes)
   const [edges, setEdges] = useState<BoardEdge[]>(initial.edges)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [agentOpen, setAgentOpen] = useState(true)
+  const [panelView, setPanelView] = useState<AgentPanelView>('stream')
+  const [inspectorMinimized, setInspectorMinimized] = useState(() => window.localStorage.getItem('canvas-relay-inspector-minimized') === 'true')
+  const [boardList, setBoardList] = useState<BoardSummary[]>(() => listBoards())
+  const [layerMenu, setLayerMenu] = useState<{ nodeId: string; x: number; y: number } | null>(null)
   const [activities, setActivities] = useState<Activity[]>([])
-  const [recording, setRecording] = useState<RecordingSession | null>(() => loadRecording())
+  const [recording, setRecording] = useState<RecordingSession | null>(() => loadRecording(initial.id))
+  const [replayCheckpointId, setReplayCheckpointId] = useState<string | null>(null)
+  const [hostedAccessToken, setHostedAccessToken] = useState(() => {
+    const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+    return fragment.get('owner') || fragment.get('access') || fragment.get('invite') || ''
+  })
+  const [hostedRole, setHostedRole] = useState<'owner' | 'user' | 'agent' | null>(() => {
+    const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+    return fragment.has('owner') ? 'owner' : fragment.has('access') ? 'user' : fragment.has('invite') ? 'agent' : null
+  })
+  const [hostedFocusClaims, setHostedFocusClaims] = useState<MuralFocusClaim[]>([])
+  const [presenceNow, setPresenceNow] = useState(() => Date.now())
+  const [shareOpen, setShareOpen] = useState(false)
+  const [shareUrl, setShareUrl] = useState('')
+  const [shareLoading, setShareLoading] = useState(false)
+  const [shareCopied, setShareCopied] = useState(false)
+  const [shareError, setShareError] = useState('')
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved')
   const [backendState, setBackendState] = useState<'checking' | 'offline' | 'syncing' | 'synced'>('checking')
   const webMCPState = useMemo(() => {
@@ -80,41 +134,154 @@ function Workspace() {
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
   })
   const [toast, setToast] = useState<string | null>(null)
+  const [confirmation, setConfirmation] = useState<{ title: string; description: string; confirmLabel: string; onConfirm: () => void } | null>(null)
+  const [instanceId] = useState(() => createUUID())
   const flowRef = useRef<ReactFlowInstance<BoardNode, BoardEdge> | null>(null)
   const nodesRef = useRef(nodes)
   const edgesRef = useRef(edges)
   const nameRef = useRef(name)
+  const boardIdRef = useRef(boardId)
+  const boardCreatedAtRef = useRef(boardCreatedAt)
   const historyRef = useRef<BoardSnapshot[]>([])
   const futureRef = useRef<BoardSnapshot[]>([])
   const recordingRef = useRef(recording)
+  const broadcastRef = useRef<BroadcastChannel | null>(null)
+  const remoteSyncRef = useRef(false)
+  const syncCounterRef = useRef(0)
+  const nodeTombstonesRef = useRef<Record<string, string>>({})
+  const edgeTombstonesRef = useRef<Record<string, string>>({})
+  const hostedRevisionRef = useRef(0)
+  const hostedReadyRef = useRef(false)
+  const hostedPullRef = useRef(false)
   const [historyStatus, setHistoryStatus] = useState({ canUndo: false, canRedo: false })
 
   useEffect(() => { nodesRef.current = nodes }, [nodes])
   useEffect(() => { edgesRef.current = edges }, [edges])
   useEffect(() => { nameRef.current = name }, [name])
+  useEffect(() => { boardIdRef.current = boardId }, [boardId])
+  useEffect(() => { boardCreatedAtRef.current = boardCreatedAt }, [boardCreatedAt])
   useEffect(() => { recordingRef.current = recording }, [recording])
 
+  useEffect(() => {
+    if (!recording || recording.status !== 'recording') return
+    const timer = window.setInterval(() => setPresenceNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [recording])
+
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    url.searchParams.set('mural', boardId)
+    window.history.replaceState({}, '', url)
+  }, [boardId])
+
   const snapshotNow = useCallback((): BoardSnapshot => ({
+    id: boardIdRef.current,
     name: nameRef.current,
-    nodes: structuredClone(nodesRef.current),
+    nodes: structuredClone(nodesRef.current.map(({ selected: _selected, dragging: _dragging, ...node }) => node)),
     edges: structuredClone(edgesRef.current),
+    createdAt: boardCreatedAtRef.current,
     updatedAt: new Date().toISOString(),
+    sync: {
+      nodeTombstones: structuredClone(nodeTombstonesRef.current),
+      edgeTombstones: structuredClone(edgeTombstonesRef.current),
+    },
   }), [])
 
-  const reportActivity = useCallback((label: string, detail: string, source: Activity['source'] = 'system') => {
+  useEffect(() => {
+    if (!('BroadcastChannel' in window)) return
+    const channel = new BroadcastChannel(`canvas-relay-mural:${boardId}`)
+    broadcastRef.current = channel
+    channel.onmessage = (event: MessageEvent<{ type: 'hello' | 'sync'; sender: string; board?: BoardSnapshot; recording?: RecordingSession | null; nodeTombstones?: Record<string, string>; edgeTombstones?: Record<string, string> }>) => {
+      const message = event.data
+      if (!message || message.sender === instanceId) return
+      if (message.type === 'hello') {
+        channel.postMessage({ type: 'sync', sender: instanceId, board: snapshotNow(), recording: recordingRef.current, nodeTombstones: nodeTombstonesRef.current, edgeTombstones: edgeTombstonesRef.current })
+        return
+      }
+      if (message.type !== 'sync' || !message.board || message.board.id !== boardIdRef.current) return
+      remoteSyncRef.current = true
+      const board = copySnapshot(message.board)
+      const incomingNodeTombstones = message.nodeTombstones ?? {}
+      const incomingEdgeTombstones = message.edgeTombstones ?? {}
+      nodeTombstonesRef.current = { ...nodeTombstonesRef.current, ...incomingNodeTombstones }
+      edgeTombstonesRef.current = { ...edgeTombstonesRef.current, ...incomingEdgeTombstones }
+      const localNodes = new Map(nodesRef.current.map((node) => [node.id, node]))
+      board.nodes.forEach((remoteNode) => {
+        const tombstone = nodeTombstonesRef.current[remoteNode.id] ?? ''
+        const local = localNodes.get(remoteNode.id)
+        const currentVersion = [nodeSyncVersion(local ?? remoteNode), tombstone].sort().at(-1) ?? ''
+        if (nodeSyncVersion(remoteNode) > currentVersion || !local && nodeSyncVersion(remoteNode) >= tombstone) {
+          localNodes.set(remoteNode.id, remoteNode)
+        }
+      })
+      Object.entries(incomingNodeTombstones).forEach(([id, version]) => {
+        const local = localNodes.get(id)
+        if (!local || version >= nodeSyncVersion(local)) localNodes.delete(id)
+      })
+      const localEdges = new Map(edgesRef.current.map((edge) => [edge.id, edge]))
+      board.edges.forEach((remoteEdge) => {
+        const tombstone = edgeTombstonesRef.current[remoteEdge.id] ?? ''
+        const local = localEdges.get(remoteEdge.id)
+        const currentVersion = [edgeSyncVersion(local ?? remoteEdge), tombstone].sort().at(-1) ?? ''
+        if (edgeSyncVersion(remoteEdge) > currentVersion || !local && edgeSyncVersion(remoteEdge) >= tombstone) {
+          localEdges.set(remoteEdge.id, remoteEdge)
+        }
+      })
+      Object.entries(incomingEdgeTombstones).forEach(([id, version]) => {
+        const local = localEdges.get(id)
+        if (!local || version >= edgeSyncVersion(local)) localEdges.delete(id)
+      })
+      board.nodes = [...localNodes.values()]
+      board.edges = [...localEdges.values()].filter((edge) => localNodes.has(edge.source) && localNodes.has(edge.target))
+      nameRef.current = board.name
+      setNameDraft(board.name)
+      nodesRef.current = board.nodes
+      edgesRef.current = board.edges
+      setName(board.name)
+      setNodes(board.nodes)
+      setEdges(board.edges)
+      const localRecording = recordingRef.current
+      const remoteRecording = message.recording ?? null
+      const nextRecording = localRecording && remoteRecording && localRecording.id === remoteRecording.id
+        ? {
+            ...(remoteRecording.status === 'complete' ? remoteRecording : localRecording),
+            participants: [...new Map([...localRecording.participants, ...remoteRecording.participants].map((participant) => [participant.id, participant])).values()],
+            events: [...new Map([...localRecording.events, ...remoteRecording.events].map((item) => [item.id, item])).values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+          }
+        : remoteRecording ?? localRecording
+      recordingRef.current = nextRecording
+      setRecording(nextRecording)
+      setSaveState('saving')
+    }
+    channel.postMessage({ type: 'hello', sender: instanceId })
+    return () => {
+      channel.close()
+      if (broadcastRef.current === channel) broadcastRef.current = null
+    }
+  }, [boardId, instanceId, snapshotNow])
+
+  useEffect(() => {
+    if (remoteSyncRef.current) {
+      remoteSyncRef.current = false
+      return
+    }
+    broadcastRef.current?.postMessage({ type: 'sync', sender: instanceId, board: snapshotNow(), recording, nodeTombstones: nodeTombstonesRef.current, edgeTombstones: edgeTombstonesRef.current })
+  }, [boardId, edges, instanceId, name, nodes, recording, snapshotNow])
+
+  const reportActivity = useCallback((label: string, detail: string, source: Activity['source'] = 'system', relatedElementIds?: string[], recordInTrace = true) => {
     const activity: Activity = {
       id: createId('activity'),
       label,
       detail,
       source,
+      actorName: source === 'agent' ? 'Canvas Relay' : source === 'human' ? 'You' : 'System',
       createdAt: new Date().toISOString(),
+      relatedElementIds,
     }
     setActivities((current) => [activity, ...current].slice(0, 30))
     const activeRecording = recordingRef.current
-    if (activeRecording?.status === 'recording') {
-      const participant = source === 'agent'
-        ? { id: 'agent-webmcp', name: 'Connected agent', role: 'agent' as const }
-        : source === 'human'
+    if (recordInTrace && source !== 'agent' && activeRecording?.status === 'recording') {
+      const participant = source === 'human'
           ? { id: 'human-facilitator', name: 'You', role: 'human' as const }
           : { id: 'canvas-relay', name: 'Canvas Relay', role: 'system' as const }
       const next = appendEvent(activeRecording, {
@@ -123,6 +290,7 @@ function Workspace() {
         participantRole: participant.role,
         kind: 'board_action',
         content: `${label}: ${detail}`,
+        relatedElementIds,
       })
       recordingRef.current = next
       setRecording(next)
@@ -134,6 +302,19 @@ function Workspace() {
     window.setTimeout(() => setToast((current) => current === message ? null : current), 2400)
   }, [])
 
+  const clearHostedAccess = useCallback(() => {
+    hostedReadyRef.current = false
+    hostedRevisionRef.current = 0
+    hostedPullRef.current = false
+    setHostedAccessToken('')
+    setHostedRole(null)
+    setHostedFocusClaims([])
+    setShareUrl('')
+    const url = new URL(window.location.href)
+    url.hash = ''
+    window.history.replaceState({}, '', url)
+  }, [])
+
   const recordHistory = useCallback(() => {
     historyRef.current = [...historyRef.current.slice(-39), copySnapshot(snapshotNow())]
     futureRef.current = []
@@ -142,14 +323,47 @@ function Workspace() {
 
   const applySnapshot = useCallback((snapshot: BoardSnapshot) => {
     const copy = copySnapshot(snapshot)
+    if (copy.sync) {
+      nodeTombstonesRef.current = { ...nodeTombstonesRef.current, ...copy.sync.nodeTombstones }
+      edgeTombstonesRef.current = { ...edgeTombstonesRef.current, ...copy.sync.edgeTombstones }
+    }
+    if (copy.id !== boardIdRef.current) {
+      nodeTombstonesRef.current = { ...(copy.sync?.nodeTombstones ?? {}) }
+      edgeTombstonesRef.current = { ...(copy.sync?.edgeTombstones ?? {}) }
+    } else {
+      const version = `${Date.now().toString().padStart(13, '0')}:${instanceId}:${String(++syncCounterRef.current).padStart(6, '0')}`
+      const nextNodeIds = new Set(copy.nodes.map((node) => node.id))
+      nodesRef.current.forEach((node) => {
+        if (!nextNodeIds.has(node.id)) nodeTombstonesRef.current[node.id] = version
+      })
+      const previousNodes = new Map(nodesRef.current.map((node) => [node.id, node]))
+      copy.nodes = copy.nodes.map((node) => {
+        const previous = previousNodes.get(node.id)
+        return !previous || JSON.stringify(comparableNode(previous)) !== JSON.stringify(comparableNode(node))
+          ? { ...node, data: { ...node.data, _syncVersion: version } }
+          : node
+      })
+      const nextEdgeIds = new Set(copy.edges.map((edge) => edge.id))
+      edgesRef.current.forEach((edge) => {
+        if (!nextEdgeIds.has(edge.id)) edgeTombstonesRef.current[edge.id] = version
+      })
+      const previousEdges = new Map(edgesRef.current.map((edge) => [edge.id, edge]))
+      copy.edges = copy.edges.map((edge) => previousEdges.has(edge.id) ? edge : { ...edge, data: { ...(edge.data ?? {}), _syncVersion: version } })
+    }
+    boardIdRef.current = copy.id
+    boardCreatedAtRef.current = copy.createdAt
     nameRef.current = copy.name
     nodesRef.current = copy.nodes
     edgesRef.current = copy.edges
+    setBoardId(copy.id)
+    setBoardCreatedAt(copy.createdAt)
     setName(copy.name)
+    setNameDraft(copy.name)
     setNodes(copy.nodes)
     setEdges(copy.edges)
     setSelectedId(null)
-  }, [])
+    setLayerMenu(null)
+  }, [instanceId])
 
   const undo = useCallback(() => {
     const previous = historyRef.current.pop()
@@ -170,16 +384,41 @@ function Workspace() {
   }, [applySnapshot, reportActivity, snapshotNow])
 
   const commitNodes = useCallback((next: BoardNode[]) => {
-    nodesRef.current = next
-    setNodes(next)
+    const version = `${Date.now().toString().padStart(13, '0')}:${instanceId}:${String(++syncCounterRef.current).padStart(6, '0')}`
+    const previous = new Map(nodesRef.current.map((node) => [node.id, node]))
+    const nextIds = new Set(next.map((node) => node.id))
+    previous.forEach((_node, id) => {
+      if (!nextIds.has(id)) nodeTombstonesRef.current[id] = version
+    })
+    const stamped = next.map((node) => {
+      const before = previous.get(node.id)
+      const changed = !before || JSON.stringify(comparableNode(before)) !== JSON.stringify(comparableNode(node))
+      if (!changed) return node
+      delete nodeTombstonesRef.current[node.id]
+      return { ...node, data: { ...node.data, _syncVersion: version } }
+    })
+    nodesRef.current = stamped
+    setNodes(stamped)
     setSaveState('saving')
-  }, [])
+  }, [instanceId])
 
   const commitEdges = useCallback((next: BoardEdge[]) => {
-    edgesRef.current = next
-    setEdges(next)
+    const version = `${Date.now().toString().padStart(13, '0')}:${instanceId}:${String(++syncCounterRef.current).padStart(6, '0')}`
+    const previous = new Map(edgesRef.current.map((edge) => [edge.id, edge]))
+    const nextIds = new Set(next.map((edge) => edge.id))
+    previous.forEach((_edge, id) => {
+      if (!nextIds.has(id)) edgeTombstonesRef.current[id] = version
+    })
+    const stamped = next.map((edge) => {
+      const before = previous.get(edge.id)
+      if (before && JSON.stringify({ ...before, data: undefined }) === JSON.stringify({ ...edge, data: undefined })) return edge
+      delete edgeTombstonesRef.current[edge.id]
+      return { ...edge, data: { ...(edge.data ?? {}), _syncVersion: version } }
+    })
+    edgesRef.current = stamped
+    setEdges(stamped)
     setSaveState('saving')
-  }, [])
+  }, [instanceId])
 
   const getCenterPosition = useCallback((offset = 0) => {
     const flow = flowRef.current
@@ -197,7 +436,7 @@ function Workspace() {
     const next = [...nodesRef.current, node]
     commitNodes(next)
     setSelectedId(node.id)
-    reportActivity('Element added', node.data.title, source)
+    reportActivity('Element added', node.data.title, source, [node.id])
     return node
   }, [commitNodes, getCenterPosition, recordHistory, reportActivity])
 
@@ -210,7 +449,7 @@ function Workspace() {
       y: origin.y + Math.floor(index / 3) * 190,
     }))
     commitNodes([...nodesRef.current, ...created])
-    reportActivity('Idea set added', `${created.length} elements created`, source)
+    reportActivity('Idea set added', `${created.length} elements created`, source, created.map((node) => node.id))
     return created
   }, [commitNodes, getCenterPosition, recordHistory, reportActivity])
 
@@ -228,7 +467,7 @@ function Workspace() {
       data: { ...existing.data, ...cleanData, justCreated: source === 'agent' },
     }
     commitNodes(nodesRef.current.map((node) => node.id === id ? updated : node))
-    reportActivity('Element updated', updated.data.title, source)
+    reportActivity('Element updated', updated.data.title, source, [updated.id])
     return updated
   }, [commitNodes, recordHistory, reportActivity])
 
@@ -249,29 +488,46 @@ function Workspace() {
     recordHistory()
     const edge = createBoardEdge(sourceId, targetId, label)
     commitEdges(addEdge(edge, edgesRef.current))
-    reportActivity('Elements connected', label || 'New relationship', source)
+    reportActivity('Elements connected', label || 'New relationship', source, [sourceId, targetId])
     return edge
   }, [commitEdges, recordHistory, reportActivity])
+
+  const renameMural = useCallback<BoardActions['renameMural']>((nextName, source = 'human') => {
+    const clean = nextName.trim().slice(0, 80) || 'Untitled brainstorm'
+    if (clean === nameRef.current) {
+      setNameDraft(clean)
+      return snapshotNow()
+    }
+    recordHistory()
+    const previous = nameRef.current
+    nameRef.current = clean
+    setName(clean)
+    setNameDraft(clean)
+    setSaveState('saving')
+    reportActivity('Mural renamed', `${previous} → ${clean}`, source)
+    return { ...snapshotNow(), name: clean }
+  }, [recordHistory, reportActivity, snapshotNow])
 
   const arrange = useCallback<BoardActions['arrange']>((layout, source = 'human') => {
     recordHistory()
     const next = arrangeNodes(nodesRef.current, layout)
     commitNodes(next)
-    reportActivity('Board arranged', `${layout} layout applied`, source)
+    reportActivity('Board arranged', `${layout} layout applied`, source, next.filter((node) => node.data.kind !== 'frame').slice(0, 12).map((node) => node.id))
     window.setTimeout(() => flowRef.current?.fitView({ padding: 0.18, duration: 450 }), 30)
   }, [commitNodes, recordHistory, reportActivity])
 
-  const createCluster = useCallback<BoardActions['createCluster']>((clusterName, elementIds, source = 'agent') => {
+  const createCluster = useCallback<BoardActions['createCluster']>((clusterName, elementIds, layout = 'none', source = 'agent') => {
     const uniqueIds = [...new Set(elementIds)]
-    const bounds = calculateClusterBounds(nodesRef.current, uniqueIds)
     recordHistory()
+    const arranged = arrangeGroupNodes(nodesRef.current, uniqueIds, layout)
+    const bounds = calculateClusterBounds(arranged, uniqueIds)
     const frame = createBoardNode({ title: clusterName, body: `${uniqueIds.length} related elements`, kind: 'frame', color: 'paper', x: bounds.x, y: bounds.y })
     frame.style = { width: bounds.width, height: bounds.height }
-    const members = nodesRef.current.map((node) => uniqueIds.includes(node.id)
+    const members = arranged.map((node) => uniqueIds.includes(node.id)
       ? { ...node, data: { ...node.data, cluster: clusterName } }
       : node)
     commitNodes([frame, ...members])
-    reportActivity('Cluster created', clusterName, source)
+    reportActivity('Cluster created', `${clusterName}, ${layout === 'none' ? 'kept positions' : `${layout} layout`}`, source, [frame.id, ...uniqueIds])
     return frame
   }, [commitNodes, recordHistory, reportActivity])
 
@@ -285,7 +541,7 @@ function Workspace() {
     const next = [...nodesRef.current, node]
     commitNodes(next)
     setSelectedId(node.id)
-    reportActivity('Artifact created', `${spec.title}, ${spec.records.length} records`, source)
+    reportActivity('Artifact created', `${spec.title}, ${spec.records.length} records`, source, [node.id])
     return node
   }, [commitNodes, getCenterPosition, recordHistory, reportActivity])
 
@@ -303,7 +559,7 @@ function Workspace() {
     recordHistory()
     const updated = { ...existing, data: { ...existing.data, artifact, title: artifact.title, justCreated: source === 'agent' } }
     commitNodes(nodesRef.current.map((node) => node.id === id ? updated : node))
-    reportActivity('Artifact data updated', `${artifact.records.length} total records`, source)
+    reportActivity('Artifact data updated', `${artifact.records.length} total records`, source, [updated.id])
     return updated
   }, [commitNodes, recordHistory, reportActivity])
 
@@ -315,6 +571,26 @@ function Workspace() {
     flowRef.current?.fitView({ nodes: valid, padding: 0.35, duration: 450 })
   }, [commitNodes])
 
+  const clearSelection = useCallback(() => {
+    const next = nodesRef.current.map((node) => node.selected ? { ...node, selected: false } : node)
+    nodesRef.current = next
+    setNodes(next)
+    setSelectedId(null)
+  }, [])
+
+  const setElementLayer = useCallback<BoardActions['setElementLayer']>((id, action, source = 'human') => {
+    const existing = nodesRef.current.find((node) => node.id === id)
+    if (!existing) throw new Error(`Element ${id} was not found.`)
+    recordHistory()
+    const next = moveNodeLayer(nodesRef.current, id, action)
+    commitNodes(next)
+    const updated = next.find((node) => node.id === id)!
+    const labels: Record<LayerAction, string> = { front: 'Brought to front', forward: 'Brought forward', backward: 'Sent backward', back: 'Sent to back' }
+    reportActivity(labels[action], existing.data.title, source, [id])
+    setLayerMenu(null)
+    return updated
+  }, [commitNodes, recordHistory, reportActivity])
+
   const clear = useCallback((source: Activity['source'] = 'human') => {
     recordHistory()
     commitNodes([])
@@ -323,6 +599,97 @@ function Workspace() {
     reportActivity('Board cleared', 'All elements removed', source)
   }, [commitEdges, commitNodes, recordHistory, reportActivity])
 
+  const createHostedMural = useCallback<BoardActions['createHostedMural']>(async (title, initialBoard) => {
+    const hosted = await createHostedMuralApi(title, initialBoard)
+    hostedRevisionRef.current = hosted.revision
+    hostedReadyRef.current = true
+    setHostedAccessToken(hosted.ownerToken)
+    setHostedRole('owner')
+    setHostedFocusClaims([])
+    setShareUrl(hosted.userUrl)
+    const url = new URL(window.location.href)
+    url.searchParams.set('mural', hosted.board.id)
+    url.hash = `owner=${encodeURIComponent(hosted.ownerToken)}`
+    window.history.replaceState({}, '', url)
+    applySnapshot(hosted.board)
+    saveBoard(hosted.board)
+    setBoardList(listBoards())
+    announce('Hosted mural created with separate user and agent access')
+    return hosted
+  }, [announce, applySnapshot])
+
+  const createUserShare = useCallback<BoardActions['createUserShare']>(async (muralId, ownerToken) => {
+    const share = await createHostedUserShare(muralId, ownerToken)
+    setShareUrl(share.userUrl)
+    return share
+  }, [])
+
+  const getAgentFocus = useCallback((): MuralFocusClaim[] => {
+    if (hostedRole) return hostedFocusClaims.filter((claim) => new Date(claim.leaseExpiresAt).getTime() > Date.now())
+    const current = recordingRef.current
+    if (!current) return []
+    return activeFocusParticipants(current).map((participant) => ({
+      ...participant.focus!,
+      participantId: participant.id,
+      participantName: participant.name,
+      color: participant.color,
+    }))
+  }, [hostedFocusClaims, hostedRole])
+
+  const setAgentFocus = useCallback<BoardActions['setAgentFocus']>(async (participant, focus) => {
+    let claims: MuralFocusClaim[]
+    if (hostedAccessToken && hostedReadyRef.current) {
+      const result = await setHostedFocus(boardIdRef.current, hostedAccessToken, participant, focus)
+      claims = result.focusClaims
+      setHostedFocusClaims(claims)
+      const current = recordingRef.current
+      if (current?.participants.some((candidate) => candidate.id === participant.id)) {
+        const next = setRecordingFocus(current, participant.id, focus)
+        recordingRef.current = next
+        setRecording(next)
+      }
+    } else {
+      const current = recordingRef.current
+      if (!current) throw new Error('No decision trace is active.')
+      const next = setRecordingFocus(current, participant.id, focus)
+      recordingRef.current = next
+      setRecording(next)
+      claims = activeFocusParticipants(next).map((candidate) => ({ ...candidate.focus!, participantId: candidate.id, participantName: candidate.name, color: candidate.color }))
+    }
+    return claims
+  }, [hostedAccessToken])
+
+  const assertAgentWritableAction = useCallback<BoardActions['assertAgentWritable']>(async (participantId, elementIds) => {
+    const localConflict = getAgentFocus().find((claim) => claim.participantId !== participantId && claim.state === 'editing' && claim.elementIds.some((id) => elementIds.includes(id)))
+    if (localConflict) throw new Error(`${localConflict.participantName} is editing one of those elements until ${localConflict.leaseExpiresAt}.`)
+    if (hostedAccessToken && hostedReadyRef.current) await assertHostedWritable(boardIdRef.current, hostedAccessToken, participantId, elementIds)
+  }, [getAgentFocus, hostedAccessToken])
+
+  const createAgentInvites = useCallback<BoardActions['createAgentInvites']>(async (muralId, ownerToken, guests) => {
+    const invitations = await createHostedAgentInvites(muralId, ownerToken, guests)
+    announce(`${invitations.length} agent invitations created`)
+    return invitations
+  }, [announce])
+
+  const redeemAgentInvite = useCallback<BoardActions['redeemAgentInvite']>(async (muralId, inviteToken) => {
+    const participant = await redeemHostedAgentInvite(muralId, inviteToken)
+    setHostedAccessToken(inviteToken)
+    setHostedRole('agent')
+    const url = new URL(window.location.href)
+    url.searchParams.set('mural', muralId)
+    url.hash = `invite=${encodeURIComponent(inviteToken)}`
+    window.history.replaceState({}, '', url)
+    const hosted = await loadHostedMural(muralId, inviteToken)
+    hostedRevisionRef.current = hosted.revision
+    hostedReadyRef.current = true
+    hostedPullRef.current = true
+    setHostedFocusClaims(hosted.focusClaims)
+    applySnapshot(hosted.board)
+    recordingRef.current = hosted.session
+    setRecording(hosted.session)
+    return participant
+  }, [applySnapshot])
+
   const actions = useMemo<BoardActions>(() => ({
     getSnapshot: snapshotNow,
     addElement,
@@ -330,20 +697,34 @@ function Workspace() {
     updateElement,
     removeElements,
     connectElements,
+    renameMural,
     arrange,
     createCluster,
     createArtifact,
     getArtifactSpec,
     updateArtifactRecords,
     focusElements,
+    setElementLayer,
     clear,
-  }), [addElement, addElements, arrange, clear, connectElements, createArtifact, createCluster, focusElements, getArtifactSpec, removeElements, snapshotNow, updateArtifactRecords, updateElement])
+    createHostedMural,
+    createUserShare,
+    getAgentFocus,
+    setAgentFocus,
+    assertAgentWritable: assertAgentWritableAction,
+    createAgentInvites,
+    redeemAgentInvite,
+  }), [addElement, addElements, arrange, assertAgentWritableAction, clear, connectElements, createAgentInvites, createArtifact, createCluster, createHostedMural, createUserShare, focusElements, getAgentFocus, getArtifactSpec, redeemAgentInvite, removeElements, renameMural, setAgentFocus, setElementLayer, snapshotNow, updateArtifactRecords, updateElement])
 
   const getRecording = useCallback(() => recordingRef.current ? structuredClone(recordingRef.current) : null, [])
 
   const startRecording = useCallback<RecordingActions['startRecording']>((title, actor) => {
-    if (recordingRef.current?.status === 'recording') return recordingRef.current
-    const session = createRecordingSession(title || `${nameRef.current} decision trace`, actor)
+    if (recordingRef.current?.status === 'recording' && recordingRef.current.boardId === boardIdRef.current) return recordingRef.current
+    const human = actor?.role === 'human' ? actor : { id: 'human-facilitator', name: 'You', role: 'human' as const, specialty: 'Facilitator' }
+    let session = createRecordingSession(title || `${nameRef.current} decision trace`, human, boardIdRef.current)
+    if (actor?.role === 'agent') {
+      session = joinRecording(session, { ...actor, status: 'active' })
+      session = { ...session, moderatorId: actor.id }
+    }
     recordingRef.current = session
     setRecording(session)
     const activity: Activity = {
@@ -368,6 +749,9 @@ function Workspace() {
     if (!current.participants.some((participant) => participant.id === input.agentId)) {
       current = joinRecording(current, { id: input.agentId, name: input.agentName, role: 'agent', specialty: 'Agent contributor' })
     }
+    if (current.participants.find((participant) => participant.id === input.agentId)?.status === 'muted') {
+      throw new Error(`${input.agentName} is muted by the session moderator.`)
+    }
     if (input.replyTo && !current.events.some((event) => event.id === input.replyTo)) {
       throw new Error(`Reply target ${input.replyTo} was not found in this session.`)
     }
@@ -379,18 +763,19 @@ function Workspace() {
       content: input.content,
       replyTo: input.replyTo,
       relatedElementIds: input.relatedElementIds,
+      metadata: input.metadata,
     })
     const event = next.events.at(-1)!
     recordingRef.current = next
     setRecording(next)
     const activity: Activity = {
-      id: createId('activity'), label: `${input.agentName}: ${input.kind}`, detail: input.content.slice(0, 120), source: 'agent', createdAt: event.createdAt,
+      id: createId('activity'), label: `${input.agentName}: ${input.kind}`, detail: input.content.slice(0, 120), source: 'agent', createdAt: event.createdAt, relatedElementIds: input.relatedElementIds,
     }
     setActivities((activities) => [activity, ...activities].slice(0, 30))
     return event
   }, [])
 
-  const recordUserMessage = useCallback<RecordingActions['recordUserMessage']>((content, kind = 'question') => {
+  const recordUserMessage = useCallback<RecordingActions['recordUserMessage']>((content, kind = 'question', relatedElementIds) => {
     const current = recordingRef.current
     if (!current) throw new Error('Start a recording before adding your contribution.')
     const next = appendEvent(current, {
@@ -399,15 +784,72 @@ function Workspace() {
       participantRole: 'human',
       kind,
       content,
+      relatedElementIds,
     })
     const event = next.events.at(-1)!
     recordingRef.current = next
     setRecording(next)
     const activity: Activity = {
-      id: createId('activity'), label: `You: ${kind}`, detail: content.slice(0, 120), source: 'human', createdAt: event.createdAt,
+      id: createId('activity'), label: `You: ${kind}`, detail: content.slice(0, 120), source: 'human', createdAt: event.createdAt, relatedElementIds,
     }
     setActivities((activities) => [activity, ...activities].slice(0, 30))
     return event
+  }, [])
+
+  const moderateParticipant = useCallback<RecordingActions['moderateParticipant']>((participantId, muted, moderatorId) => {
+    const current = recordingRef.current
+    if (!current) throw new Error('No active recording is available to moderate.')
+    const next = moderateRecording(current, participantId, muted, moderatorId)
+    recordingRef.current = next
+    setRecording(next)
+    return next
+  }, [])
+
+  const watchParticipant = useCallback<RecordingActions['watchParticipant']>((participantId, elementIds = [], renewFocus = false) => {
+    const current = recordingRef.current
+    if (!current) throw new Error('No decision trace is available to watch.')
+    const next = watchRecording(current, participantId, elementIds, renewFocus)
+    recordingRef.current = next
+    setRecording(next)
+    return next
+  }, [])
+
+  const setParticipantFocus = useCallback<RecordingActions['setParticipantFocus']>((participantId, focus) => {
+    const current = recordingRef.current
+    if (!current) throw new Error('No decision trace is active.')
+    const next = setRecordingFocus(current, participantId, focus)
+    recordingRef.current = next
+    setRecording(next)
+    return next
+  }, [])
+
+  const createCheckpoint = useCallback<RecordingActions['createCheckpoint']>((label, board, actor) => {
+    const current = recordingRef.current
+    if (!current) throw new Error('No decision trace is active.')
+    const next = addRecordingCheckpoint(current, label, board, actor)
+    const event = next.events.at(-1)!
+    recordingRef.current = next
+    setRecording(next)
+    return event
+  }, [])
+
+  const updateCheckpoint = useCallback<RecordingActions['updateCheckpoint']>((eventId, label) => {
+    const current = recordingRef.current
+    if (!current) throw new Error('No decision trace is active.')
+    const next = renameRecordingCheckpoint(current, eventId, label)
+    recordingRef.current = next
+    setRecording(next)
+    return next
+  }, [])
+
+  const removeCheckpoint = useCallback<RecordingActions['removeCheckpoint']>((eventId) => {
+    const current = recordingRef.current
+    if (!current) throw new Error('No decision trace is active.')
+    const next = deleteRecordingCheckpoint(current, eventId)
+    recordingRef.current = next
+    setRecording(next)
+    setReplayCheckpointId((active) => active === eventId ? null : active)
+    return next
   }, [])
 
   const finalizeRecording = useCallback<RecordingActions['finalizeRecording']>((finalOutput, actor) => {
@@ -430,20 +872,100 @@ function Workspace() {
     joinParticipant,
     recordContribution,
     recordUserMessage,
+    moderateParticipant,
+    watchParticipant,
+    setParticipantFocus,
+    createCheckpoint,
+    updateCheckpoint,
+    removeCheckpoint,
     finalizeRecording,
-  }), [finalizeRecording, getRecording, joinParticipant, recordContribution, recordUserMessage, startRecording])
+  }), [createCheckpoint, finalizeRecording, getRecording, joinParticipant, moderateParticipant, recordContribution, recordUserMessage, removeCheckpoint, setParticipantFocus, startRecording, updateCheckpoint, watchParticipant])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       try {
         saveBoard(snapshotNow())
+        setBoardList(listBoards())
         setSaveState('saved')
       } catch {
         setSaveState('error')
       }
     }, 180)
     return () => window.clearTimeout(timer)
-  }, [edges, name, nodes, snapshotNow])
+  }, [boardId, edges, name, nodes, snapshotNow])
+
+  useEffect(() => {
+    const requestedId = new URLSearchParams(window.location.search).get('mural')
+    if (!requestedId || !hostedAccessToken || hostedReadyRef.current && requestedId === boardIdRef.current) return
+    let active = true
+    loadHostedMural(requestedId, hostedAccessToken).then((hosted) => {
+      if (!active) return
+      hostedRevisionRef.current = hosted.revision
+      hostedReadyRef.current = true
+      hostedPullRef.current = true
+      setHostedRole(hosted.role)
+      setHostedFocusClaims(hosted.focusClaims)
+      applySnapshot(hosted.board)
+      saveBoard(hosted.board)
+      setBoardList(listBoards())
+      recordingRef.current = hosted.session
+      setRecording(hosted.session)
+      announce(`Connected to hosted mural as ${hosted.role}`)
+    }).catch((error) => {
+      if (active) announce(error instanceof Error ? error.message : 'Could not open the hosted mural')
+    })
+    return () => { active = false }
+  }, [announce, applySnapshot, hostedAccessToken])
+
+  useEffect(() => {
+    if (!hostedAccessToken || !hostedReadyRef.current) return
+    if (hostedPullRef.current) {
+      hostedPullRef.current = false
+      return
+    }
+    const timer = window.setTimeout(() => {
+      saveHostedMural(snapshotNow(), hostedAccessToken).then((saved) => {
+        hostedRevisionRef.current = saved.revision
+        hostedPullRef.current = true
+        applySnapshot(saved.board)
+        setBackendState('synced')
+      }).catch(() => setBackendState('offline'))
+    }, 420)
+    return () => window.clearTimeout(timer)
+  }, [applySnapshot, boardId, edges, hostedAccessToken, name, nodes, snapshotNow])
+
+  useEffect(() => {
+    if (!hostedAccessToken || !hostedReadyRef.current) return
+    let active = true
+    let busy = false
+    const poll = async () => {
+      if (busy) return
+      busy = true
+      try {
+        const hosted = await loadHostedMural(boardIdRef.current, hostedAccessToken)
+        if (!active) return
+        if (hosted.revision > hostedRevisionRef.current) {
+          hostedRevisionRef.current = hosted.revision
+          hostedPullRef.current = true
+          applySnapshot(hosted.board)
+        }
+        setHostedRole(hosted.role)
+        setHostedFocusClaims(hosted.focusClaims)
+        const localLastEvent = recordingRef.current?.events.at(-1)?.id
+        const remoteLastEvent = hosted.session?.events.at(-1)?.id
+        if (hosted.session && remoteLastEvent !== localLastEvent) {
+          recordingRef.current = hosted.session
+          setRecording(hosted.session)
+        }
+      } catch {
+        if (active) setBackendState('offline')
+      } finally {
+        busy = false
+      }
+    }
+    const timer = window.setInterval(poll, 1500)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [applySnapshot, hostedAccessToken])
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -451,8 +973,12 @@ function Workspace() {
   }, [theme])
 
   useEffect(() => {
-    saveRecording(recording)
-  }, [recording])
+    window.localStorage.setItem('canvas-relay-inspector-minimized', String(inspectorMinimized))
+  }, [inspectorMinimized])
+
+  useEffect(() => {
+    saveRecording(recording, boardId)
+  }, [boardId, recording])
 
   useEffect(() => {
     let active = true
@@ -467,24 +993,30 @@ function Workspace() {
     const timer = window.setTimeout(async () => {
       setBackendState('syncing')
       try {
-        await syncRecording(recording, snapshotNow())
+        await syncRecording(recording, snapshotNow(), hostedAccessToken)
         setBackendState('synced')
       } catch {
         setBackendState('offline')
       }
     }, 320)
     return () => window.clearTimeout(timer)
-  }, [edges, name, nodes, recording, snapshotNow])
+  }, [edges, hostedAccessToken, name, nodes, recording, snapshotNow])
 
   useEffect(() => {
-    const registration = registerWebMCP(actions, recordingActions, (label, detail) => reportActivity(label, detail, 'agent'))
+    const registration = registerWebMCP(actions, recordingActions, () => undefined)
     return registration.cleanup
-  }, [actions, recordingActions, reportActivity])
+  }, [actions, recordingActions])
 
   const onNodesChange = useCallback((changes: NodeChange<BoardNode>[]) => {
     const next = applyNodeChanges(changes, nodesRef.current)
     commitNodes(next)
-  }, [commitNodes])
+    changes.forEach((change) => {
+      if (change.type === 'dimensions' && change.resizing === false) {
+        const node = next.find((candidate) => candidate.id === change.id)
+        if (node) reportActivity('Element resized', node.data.title, 'human', [node.id])
+      }
+    })
+  }, [commitNodes, reportActivity])
 
   const onEdgesChange = useCallback((changes: EdgeChange<BoardEdge>[]) => {
     const next = applyEdgeChanges(changes, edgesRef.current)
@@ -511,6 +1043,12 @@ function Workspace() {
     commitNodes(next)
   }, [commitNodes])
 
+  const commitInspectorChange = useCallback((id: string, field: string) => {
+    const node = nodesRef.current.find((candidate) => candidate.id === id)
+    if (!node) return
+    reportActivity('Element updated', `${node.data.title}: ${field}`, 'human', [id])
+  }, [reportActivity])
+
   const duplicateElement = useCallback((id: string) => {
     const existing = nodesRef.current.find((node) => node.id === id)
     if (!existing) return
@@ -524,11 +1062,15 @@ function Workspace() {
     }
     commitNodes([...nodesRef.current.map((node): BoardNode => ({ ...node, selected: false })), duplicate])
     setSelectedId(duplicate.id)
-    reportActivity('Element duplicated', duplicate.data.title, 'human')
+    reportActivity('Element duplicated', duplicate.data.title, 'human', [duplicate.id])
   }, [commitNodes, recordHistory, reportActivity])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (confirmation) {
+        if (event.key === 'Escape') setConfirmation(null)
+        return
+      }
       const target = event.target as HTMLElement
       if (target.matches('input, textarea, [contenteditable="true"]')) return
       const mod = event.metaKey || event.ctrlKey
@@ -539,6 +1081,12 @@ function Workspace() {
       } else if (mod && event.key.toLowerCase() === 'd' && selectedId) {
         event.preventDefault()
         duplicateElement(selectedId)
+      } else if (mod && event.key === ']' && selectedId) {
+        event.preventDefault()
+        setElementLayer(selectedId, event.altKey ? 'front' : 'forward', 'human')
+      } else if (mod && event.key === '[' && selectedId) {
+        event.preventDefault()
+        setElementLayer(selectedId, event.altKey ? 'back' : 'backward', 'human')
       } else if ((event.key === 'Backspace' || event.key === 'Delete') && selectedId) {
         event.preventDefault()
         removeElements([selectedId], 'human')
@@ -547,11 +1095,27 @@ function Workspace() {
       else if (event.key === '+' || event.key === '=') flowRef.current?.zoomIn({ duration: 180 })
       else if (event.key === '-') flowRef.current?.zoomOut({ duration: 180 })
       else if (event.key === '0') flowRef.current?.fitView({ padding: 0.2, duration: 300 })
-      else if (event.key === 'Escape') setSelectedId(null)
+      else if (event.key === 'Escape') {
+        clearSelection()
+        setLayerMenu(null)
+        document.querySelectorAll<HTMLDetailsElement>('details[open]').forEach((details) => details.removeAttribute('open'))
+      }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [addElement, duplicateElement, redo, removeElements, selectedId, undo])
+  }, [addElement, clearSelection, confirmation, duplicateElement, redo, removeElements, selectedId, setElementLayer, undo])
+
+  useEffect(() => {
+    const closeOutside = (event: PointerEvent) => {
+      const target = event.target as Node
+      document.querySelectorAll<HTMLDetailsElement>('details[open]').forEach((details) => {
+        if (!details.contains(target)) details.removeAttribute('open')
+      })
+      if (layerMenu && !(target as Element).closest?.('.layer-context-menu')) setLayerMenu(null)
+    }
+    document.addEventListener('pointerdown', closeOutside)
+    return () => document.removeEventListener('pointerdown', closeOutside)
+  }, [layerMenu])
 
   const copyArtifactSpec = useCallback(async (id: string) => {
     const spec = getArtifactSpec(id)
@@ -597,19 +1161,82 @@ function Workspace() {
     announce('Agent recipe arranged ideas by their cluster field')
   }, [addElements, arrange, createArtifact, announce])
 
-  const resetDemo = useCallback(() => {
-    if (!window.confirm('Replace the current board with the demo board? You can undo this action.')) return
+  const restoreDemo = useCallback(() => {
     recordHistory()
-    applySnapshot(INITIAL_SNAPSHOT)
+    applySnapshot({ ...structuredClone(INITIAL_SNAPSHOT), id: boardIdRef.current, createdAt: boardCreatedAtRef.current, updatedAt: new Date().toISOString() })
     reportActivity('Demo restored', 'Loaded the hybrid rituals example', 'human')
   }, [applySnapshot, recordHistory, reportActivity])
 
+  const resetDemo = useCallback(() => {
+    setConfirmation({
+      title: 'Restore the demo mural?',
+      description: 'This replaces the current canvas with the hybrid rituals example. You can undo the change afterward.',
+      confirmLabel: 'Restore demo',
+      onConfirm: () => {
+        restoreDemo()
+        setConfirmation(null)
+      },
+    })
+  }, [restoreDemo])
+
   const newBoard = useCallback(() => {
-    if (nodesRef.current.length && !window.confirm('Clear the canvas and start a new board? You can undo this action.')) return
-    recordHistory()
-    applySnapshot(EMPTY_SNAPSHOT)
+    clearHostedAccess()
+    saveBoard(snapshotNow())
+    const board = createEmptyBoard()
+    applySnapshot(board)
+    recordingRef.current = null
+    setRecording(null)
+    setActivities([])
+    historyRef.current = []
+    futureRef.current = []
+    setHistoryStatus({ canUndo: false, canRedo: false })
+    saveBoard(board)
+    setBoardList(listBoards())
     reportActivity('New board', 'Started with an empty canvas', 'human')
-  }, [applySnapshot, recordHistory, reportActivity])
+    announce('New mural created')
+  }, [announce, applySnapshot, clearHostedAccess, reportActivity, snapshotNow])
+
+  const switchBoard = useCallback((id: string) => {
+    if (id === boardIdRef.current) return
+    saveBoard(snapshotNow())
+    const board = loadBoardById(id)
+    if (!board) return announce('That mural is no longer available')
+    clearHostedAccess()
+    applySnapshot(board)
+    const nextRecording = loadRecording(board.id)
+    recordingRef.current = nextRecording
+    setRecording(nextRecording)
+    setActivities([])
+    historyRef.current = []
+    futureRef.current = []
+    setHistoryStatus({ canUndo: false, canRedo: false })
+    announce(`Opened ${board.name}`)
+  }, [announce, applySnapshot, clearHostedAccess, snapshotNow])
+
+  const openBoardInstance = useCallback((id: string) => {
+    const url = new URL(window.location.href)
+    url.searchParams.set('mural', id)
+    if (id !== boardIdRef.current) url.hash = ''
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }, [])
+
+  const handleBoardImport = useCallback(async (file: File) => {
+    try {
+      clearHostedAccess()
+      saveBoard(snapshotNow())
+      const imported = importCanvasRelay(await file.text())
+      const { board } = imported
+      applySnapshot(board)
+      recordingRef.current = imported.recording
+      setRecording(imported.recording)
+      saveRecording(imported.recording, board.id)
+      setActivities([])
+      setBoardList(listBoards())
+      announce(`Imported ${board.name}`)
+    } catch (error) {
+      announce(error instanceof Error ? error.message : 'Could not import that mural')
+    }
+  }, [announce, applySnapshot, clearHostedAccess, snapshotNow])
 
   const exportBoard = useCallback(() => {
     const content = serializeSnapshot(snapshotNow())
@@ -621,6 +1248,25 @@ function Workspace() {
     URL.revokeObjectURL(url)
     reportActivity('Board exported', 'Downloaded a portable JSON snapshot', 'human')
   }, [reportActivity, snapshotNow])
+
+  const openPanel = useCallback((view: AgentPanelView) => {
+    setPanelView(view)
+    setAgentOpen(true)
+    clearSelection()
+  }, [clearSelection])
+
+  const sendUserMessage = useCallback((content: string) => {
+    if (recordingRef.current?.status !== 'recording') startRecording(`${nameRef.current} decision trace`)
+    recordUserMessage(content, 'question')
+    openPanel('stream')
+    announce('Message added to the shared stream')
+  }, [announce, openPanel, recordUserMessage, startRecording])
+
+  const commentOnElement = useCallback((id: string, content: string) => {
+    if (recordingRef.current?.status !== 'recording') startRecording(`${nameRef.current} decision trace`)
+    recordUserMessage(content, 'note', [id])
+    announce('Comment added to the element and global conversation')
+  }, [announce, recordUserMessage, startRecording])
 
   const finishRecordingFromUI = useCallback(() => {
     const current = recordingRef.current
@@ -651,17 +1297,17 @@ function Workspace() {
     announce(`Decision trace exported as ${extension.toUpperCase()}`)
   }, [announce, snapshotNow])
 
-  const loadMultiAgentDemo = useCallback(() => {
-    if (recordingRef.current?.status === 'recording' && !window.confirm('Replace the active recording with a multi-agent demo?')) return
+  const applyMultiAgentDemo = useCallback(() => {
     let session = createRecordingSession('Remote onboarding decision trace', {
       id: 'human-facilitator', name: 'You', role: 'human', specialty: 'Facilitator',
-    })
+    }, boardIdRef.current)
     const participants = [
       { id: 'agent-explorer', name: 'Explorer', role: 'agent' as const, specialty: 'Divergent ideation' },
       { id: 'agent-critic', name: 'Critic', role: 'agent' as const, specialty: 'Risks and constraints' },
       { id: 'agent-synth', name: 'Synthesizer', role: 'agent' as const, specialty: 'Decisions and next steps' },
     ]
     participants.forEach((participant) => { session = joinRecording(session, participant) })
+    session = { ...session, moderatorId: 'agent-synth' }
     session = appendEvent(session, {
       participantId: 'human-facilitator', participantName: 'You', participantRole: 'human', kind: 'question',
       content: 'How might we make remote onboarding useful from the first day without adding more meetings?',
@@ -678,40 +1324,194 @@ function Workspace() {
       content: 'A single checklist can hide timezone and role differences. Keep the primitives reusable and let each role generate its own artifact.',
       relatedElementIds: ['artifact-decision'],
     })
+    const critiqueId = session.events.at(-1)!.id
     session = appendEvent(session, {
-      participantId: 'agent-synth', participantName: 'Synthesizer', participantRole: 'agent', kind: 'decision',
+      participantId: 'agent-explorer', participantName: 'Explorer', participantRole: 'agent', kind: 'evidence', replyTo: critiqueId,
+      content: 'Role-specific templates address that risk. The shared layer should stay small: owner, first outcome, buddy, access, and one visible question.',
+      relatedElementIds: ['idea-map'],
+    })
+    const evidenceId = session.events.at(-1)!.id
+    session = appendEvent(session, {
+      participantId: 'agent-critic', participantName: 'Critic', participantRole: 'agent', kind: 'question', replyTo: evidenceId,
+      content: 'What prevents the template from becoming another stale checklist, and how will a new hire signal that something is blocked?',
+      relatedElementIds: ['idea-room'],
+    })
+    const criticQuestionId = session.events.at(-1)!.id
+    session = appendEvent(session, {
+      participantId: 'human-facilitator', participantName: 'You', participantRole: 'human', kind: 'evidence', replyTo: criticQuestionId,
+      content: 'Keep it usable offline and make every blocked item visible to the buddy. The first useful outcome matters more than task completion.',
+    })
+    const humanConstraintId = session.events.at(-1)!.id
+    session = appendEvent(session, {
+      participantId: 'agent-synth', participantName: 'Synthesizer', participantRole: 'agent', kind: 'reasoning_summary', replyTo: humanConstraintId,
+      content: 'Shared direction: use a small role template, surface blockers as first-class cards, and evaluate success by contribution rather than checklist completion.',
+      relatedElementIds: ['artifact-decision', 'action-prototype'],
+    })
+    const synthesisId = session.events.at(-1)!.id
+    session = appendEvent(session, {
+      participantId: 'agent-synth', participantName: 'Synthesizer', participantRole: 'agent', kind: 'decision', replyTo: synthesisId,
       content: 'Adopt role-based artifact templates and test them with five new hires. Measure time to first meaningful contribution.',
       relatedElementIds: ['artifact-decision', 'action-prototype'],
     })
     recordingRef.current = session
     setRecording(session)
-    setAgentOpen(true)
+    openPanel('stream')
     announce('Loaded a live trace with three agent participants')
-  }, [announce])
+  }, [announce, openPanel])
 
-  const selectedNode = nodes.find((node) => node.id === selectedId) ?? null
+  const loadMultiAgentDemo = useCallback(() => {
+    if (recordingRef.current?.status === 'recording') {
+      setConfirmation({
+        title: 'Replace the active trace?',
+        description: 'This replaces the current live trace with the multi-agent demo. Export the current trace first if you need to keep it.',
+        confirmLabel: 'Load agent demo',
+        onConfirm: () => {
+          applyMultiAgentDemo()
+          setConfirmation(null)
+        },
+      })
+      return
+    }
+    applyMultiAgentDemo()
+  }, [applyMultiAgentDemo])
+
+  const openShare = useCallback(() => {
+    setShareCopied(false)
+    setShareError('')
+    if (hostedRole === 'user') setShareUrl(window.location.href)
+    if (hostedRole === 'agent') setShareUrl('')
+    setShareOpen(true)
+  }, [hostedRole])
+
+  const publishAndShare = useCallback(async () => {
+    setShareLoading(true)
+    setShareError('')
+    try {
+      const hosted = await createHostedMural(nameRef.current, snapshotNow())
+      setShareUrl(hosted.userUrl)
+      announce('Mural published. Collaborator link ready')
+    } catch (error) {
+      setShareError(error instanceof Error ? error.message : 'Could not publish this mural.')
+    } finally {
+      setShareLoading(false)
+    }
+  }, [announce, createHostedMural, snapshotNow])
+
+  const generateShare = useCallback(async () => {
+    setShareLoading(true)
+    setShareError('')
+    try {
+      const share = await createUserShare(boardIdRef.current, hostedAccessToken)
+      setShareUrl(share.userUrl)
+      setShareCopied(false)
+      announce('Fresh collaborator link created')
+    } catch (error) {
+      setShareError(error instanceof Error ? error.message : 'Could not create a collaborator link.')
+    } finally {
+      setShareLoading(false)
+    }
+  }, [announce, createUserShare, hostedAccessToken])
+
+  const copyShareLink = useCallback(async () => {
+    if (!shareUrl) return
+    try {
+      await navigator.clipboard.writeText(shareUrl)
+      setShareCopied(true)
+      announce('Collaborator link copied')
+    } catch {
+      setShareError('Clipboard access was unavailable. Select and copy the URL manually.')
+    }
+  }, [announce, shareUrl])
+
+  const saveCurrentCheckpoint = useCallback(() => {
+    if (recordingRef.current?.status !== 'recording') startRecording(`${nameRef.current} decision trace`)
+    const current = recordingRef.current!
+    const index = current.events.filter((event) => event.kind === 'checkpoint').length + 1
+    createCheckpoint(`Checkpoint ${index}`, snapshotNow(), { id: 'human-facilitator', name: 'You', role: 'human' })
+    announce(`Checkpoint ${index} saved`)
+  }, [announce, createCheckpoint, snapshotNow, startRecording])
+
+  const renameCheckpointFromUI = useCallback((eventId: string, label: string) => {
+    updateCheckpoint(eventId, label)
+    announce('Checkpoint renamed')
+  }, [announce, updateCheckpoint])
+
+  const deleteCheckpointFromUI = useCallback((eventId: string) => {
+    const label = recordingRef.current?.events.find((event) => event.id === eventId)?.checkpoint?.label ?? 'this checkpoint'
+    setConfirmation({
+      title: 'Delete replay checkpoint?',
+      description: `Remove “${label}” from the timeline. The live mural will not change.`,
+      confirmLabel: 'Delete checkpoint',
+      onConfirm: () => {
+        removeCheckpoint(eventId)
+        setConfirmation(null)
+        announce('Checkpoint removed')
+      },
+    })
+  }, [announce, removeCheckpoint])
+
+  const openReplayCheckpoint = useCallback((eventId: string | null) => {
+    setReplayCheckpointId(eventId)
+    clearSelection()
+  }, [clearSelection])
+
+  const replayBoard = replayCheckpointId
+    ? recording?.events.find((event) => event.id === replayCheckpointId)?.checkpoint?.board ?? null
+    : null
+  const selectedNode = !replayBoard ? nodes.find((node) => node.id === selectedId) ?? null : null
+  const activeFocusClaims = useMemo(() => {
+    if (hostedRole) return hostedFocusClaims.filter((claim) => new Date(claim.leaseExpiresAt).getTime() > presenceNow)
+    if (!recording) return []
+    return activeFocusParticipants(recording, presenceNow).map((participant) => ({
+      ...participant.focus!, participantId: participant.id, participantName: participant.name, color: participant.color,
+    }))
+  }, [hostedFocusClaims, hostedRole, presenceNow, recording])
+  const renderedNodes = useMemo(() => nodes.map((node) => {
+    const claim = activeFocusClaims.find((candidate) => candidate.elementIds.includes(node.id))
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        _focusPresence: claim ? {
+          participantName: claim.participantName,
+          intent: claim.intent,
+          color: claim.color ?? 'coral',
+          state: claim.state,
+        } : undefined,
+      },
+    }
+  }), [activeFocusClaims, nodes])
 
   return (
     <main className="app-shell">
       <header className="top-bar">
         <div className="brand-lockup">
-          <div className="brand-mark" aria-hidden="true"><span /><span /><span /></div>
+          <div className="brand-mark header-mark" role="img" aria-label="Canvas Relay"><span /><span /><span /></div>
           <div className="board-title-wrap">
             <span className="product-name">Canvas Relay</span>
             <input
-              aria-label="Board name"
-              value={name}
+              value={nameDraft}
               maxLength={80}
-              onChange={(event) => {
-                nameRef.current = event.target.value
-                setName(event.target.value)
-                setSaveState('saving')
+              aria-label="Mural name"
+              onChange={(event) => setNameDraft(event.target.value)}
+              onBlur={() => renameMural(nameDraft, 'human')}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') event.currentTarget.blur()
+                if (event.key === 'Escape') { setNameDraft(name); event.currentTarget.blur() }
               }}
             />
           </div>
         </div>
 
         <div className="top-actions">
+          <BoardLibraryMenu
+            boards={boardList}
+            currentId={boardId}
+            onNew={newBoard}
+            onSelect={switchBoard}
+            onOpenInstance={openBoardInstance}
+            onImport={handleBoardImport}
+          />
           <div className="history-controls" aria-label="History controls">
             <button type="button" className="icon-button" onClick={undo} disabled={!historyStatus.canUndo} aria-label="Undo"><ArrowCounterClockwise size={18} /></button>
             <button type="button" className="icon-button" onClick={redo} disabled={!historyStatus.canRedo} aria-label="Redo"><ArrowClockwise size={18} /></button>
@@ -719,55 +1519,75 @@ function Workspace() {
           <details className="top-menu">
             <summary className="secondary-button"><Rows size={17} />Arrange<CaretDown size={13} /></summary>
             <div className="top-menu-popover">
-              <button type="button" onClick={() => arrange('grid')}>Grid</button>
-              <button type="button" onClick={() => arrange('columns')}>Columns by cluster</button>
-              <button type="button" onClick={() => arrange('radial')}>Radial map</button>
+              <button type="button" onClick={(event) => { arrange('grid'); event.currentTarget.closest('details')?.removeAttribute('open') }}>Grid</button>
+              <button type="button" onClick={(event) => { arrange('columns'); event.currentTarget.closest('details')?.removeAttribute('open') }}>Columns by cluster</button>
+              <button type="button" onClick={(event) => { arrange('radial'); event.currentTarget.closest('details')?.removeAttribute('open') }}>Radial map</button>
+              <button type="button" onClick={(event) => { arrange('stacked'); event.currentTarget.closest('details')?.removeAttribute('open') }}>Stacked</button>
               <span />
-              <button type="button" onClick={newBoard}>New blank board</button>
-              <button type="button" onClick={resetDemo}>Restore demo</button>
+              <button type="button" onClick={(event) => { newBoard(); event.currentTarget.closest('details')?.removeAttribute('open') }}>New blank board</button>
+              <button type="button" onClick={(event) => { resetDemo(); event.currentTarget.closest('details')?.removeAttribute('open') }}>Restore demo</button>
             </div>
           </details>
           <button type="button" className="icon-button theme-button" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')} aria-label={`Use ${theme === 'light' ? 'dark' : 'light'} theme`}>
             {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
           </button>
           <button type="button" className="secondary-button export-button" onClick={exportBoard}><DownloadSimple size={17} />Export</button>
+          <button type="button" className="secondary-button share-button" onClick={openShare}><ShareNetwork size={17} />Share</button>
           <button
             type="button"
-            className={`record-top-button ${recording?.status === 'recording' ? 'is-recording' : ''}`}
-            onClick={() => {
-              setAgentOpen(true)
-              if (!recording) startRecording()
-            }}
+            className={`record-top-button ${recording?.status === 'recording' ? 'is-recording' : ''} ${agentOpen && panelView === 'session' ? 'is-active' : ''}`}
+            onClick={() => openPanel('session')}
           >
-            <Record size={13} weight="fill" />{recording?.status === 'recording' ? 'REC' : recording ? 'Trace' : 'Record'}
+            <Record size={13} weight="fill" />{recording?.status === 'recording' ? 'REC' : 'Trace'}
           </button>
-          <button type="button" className={`agent-toggle ${agentOpen ? 'is-active' : ''}`} onClick={() => setAgentOpen((open) => !open)}>
-            <Robot size={18} weight="fill" />Agent
+          <button
+            type="button"
+            className={`agent-toggle ${agentOpen && panelView === 'activity' ? 'is-active' : ''}`}
+            onClick={() => agentOpen && panelView === 'activity' ? setAgentOpen(false) : openPanel('activity')}
+          >
+            <ClockCounterClockwise size={18} weight="bold" />Activity
             <span className={webMCPState.supported ? 'connection-light ready' : 'connection-light'} aria-hidden="true" />
           </button>
         </div>
       </header>
 
-      <section className="workspace">
+      <section className={`workspace ${replayBoard ? 'is-replaying' : ''}`}>
         <ToolRail onAdd={addKind} onArtifact={addArtifact} />
         <div className="canvas-wrap">
           <ReactFlow<BoardNode, BoardEdge>
-            nodes={nodes}
-            edges={edges}
+            nodes={replayBoard?.nodes ?? renderedNodes}
+            edges={replayBoard?.edges ?? edges}
             nodeTypes={NODE_TYPES}
             onInit={(instance) => { flowRef.current = instance }}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
+            onNodesChange={(changes) => { if (!replayBoard) onNodesChange(changes) }}
+            onEdgesChange={(changes) => { if (!replayBoard) onEdgesChange(changes) }}
+            onConnect={(connection) => { if (!replayBoard) onConnect(connection) }}
             onSelectionChange={({ nodes: selected }) => setSelectedId(selected.length === 1 ? selected[0].id : null)}
+            onNodeContextMenu={(event, node) => {
+              event.preventDefault()
+              setSelectedId(node.id)
+              setLayerMenu({
+                nodeId: node.id,
+                x: Math.min(event.clientX, window.innerWidth - 248),
+                y: Math.min(event.clientY, window.innerHeight - 290),
+              })
+            }}
+            onPaneClick={() => {
+              clearSelection()
+              setLayerMenu(null)
+            }}
             onNodeDragStart={recordHistory}
+            onNodeDragStop={(_event, node) => reportActivity('Element moved', node.data.title, 'human', [node.id])}
             onDoubleClick={(event) => {
+              if (replayBoard) return
               if ((event.target as Element).classList.contains('react-flow__pane')) {
                 const position = flowRef.current?.screenToFlowPosition({ x: event.clientX, y: event.clientY })
                 addElement({ title: 'New idea', kind: 'idea', x: position?.x, y: position?.y })
               }
             }}
             deleteKeyCode={null}
+            nodesDraggable={!replayBoard}
+            nodesConnectable={!replayBoard}
             selectionOnDrag
             panOnScroll
             fitView
@@ -775,6 +1595,7 @@ function Workspace() {
             minZoom={0.2}
             maxZoom={2.2}
             colorMode={theme}
+            elevateNodesOnSelect={false}
           >
             <Background variant={BackgroundVariant.Dots} gap={22} size={1.25} />
             <Controls showInteractive={false} position="bottom-left" />
@@ -787,6 +1608,25 @@ function Workspace() {
             />
           </ReactFlow>
 
+          {replayBoard && <div className="replay-banner" role="status"><span>Replay</span><strong>{recording?.events.find((event) => event.id === replayCheckpointId)?.checkpoint?.label}</strong><small>{new Date(replayBoard.updatedAt).toLocaleString()}</small><button type="button" onClick={() => openReplayCheckpoint(null)}>Exit replay</button></div>}
+
+          <CollaborationDock
+            recording={recording}
+            onSend={sendUserMessage}
+            onOpenTrace={() => openPanel('stream')}
+          />
+
+          {layerMenu && selectedNode && layerMenu.nodeId === selectedNode.id && (
+            <LayerMenu
+              x={layerMenu.x}
+              y={layerMenu.y}
+              title={selectedNode.data.title}
+              onLayer={(action) => setElementLayer(selectedNode.id, action, 'human')}
+              onDuplicate={() => { duplicateElement(selectedNode.id); setLayerMenu(null) }}
+              onDelete={() => { removeElements([selectedNode.id], 'human'); setLayerMenu(null) }}
+            />
+          )}
+
           {!nodes.length && (
             <div className="empty-board">
               <div className="empty-icon"><BracketsCurly size={25} weight="bold" /></div>
@@ -794,7 +1634,7 @@ function Workspace() {
               <p>Double-click anywhere, add a structured artifact, or let an agent build the first map.</p>
               <div>
                 <button type="button" className="primary-button" onClick={() => addKind('idea')}>Create first idea</button>
-                <button type="button" className="secondary-button" onClick={() => setAgentOpen(true)}>Open agent tools</button>
+                <button type="button" className="secondary-button" onClick={() => openPanel('agent')}>Open agent tools</button>
               </div>
             </div>
           )}
@@ -810,33 +1650,61 @@ function Workspace() {
 
         {selectedNode && (
           <Inspector
+            key={selectedNode.id}
             node={selectedNode}
+            minimized={inspectorMinimized}
+            onToggleMinimized={() => setInspectorMinimized((current) => !current)}
             onUpdate={updateFromInspector}
+            onCommit={commitInspectorChange}
             onDelete={(id) => removeElements([id], 'human')}
             onDuplicate={duplicateElement}
-            onClose={() => setSelectedId(null)}
+            onClose={clearSelection}
             onCopySpec={copyArtifactSpec}
+            onLayer={(action) => setElementLayer(selectedNode.id, action, 'human')}
+            comments={(recording?.events ?? []).filter((event) => event.kind !== 'board_action' && event.kind !== 'result' && event.relatedElementIds?.includes(selectedNode.id))}
+            onComment={(content) => commentOnElement(selectedNode.id, content)}
           />
         )}
 
         <AgentPanel
           isOpen={agentOpen && !selectedNode}
+          view={panelView}
           supported={webMCPState.supported}
           toolCount={webMCPState.count}
           activities={activities}
+          nodes={nodes}
           recording={recording}
           backendState={backendState}
+          onViewChange={setPanelView}
           onClose={() => setAgentOpen(false)}
           onRunDemo={runDemoRecipe}
           onStartRecording={() => startRecording()}
           onFinalizeRecording={finishRecordingFromUI}
           onExportRecording={exportRecording}
-          onRecordUserMessage={(content) => recordUserMessage(content, 'question')}
           onLoadMultiAgentDemo={loadMultiAgentDemo}
+          onFocusElement={(id) => focusElements([id])}
+          replayCheckpointId={replayCheckpointId}
+          onAddCheckpoint={saveCurrentCheckpoint}
+          onUpdateCheckpoint={renameCheckpointFromUI}
+          onDeleteCheckpoint={deleteCheckpointFromUI}
+          onReplayCheckpoint={openReplayCheckpoint}
         />
       </section>
 
       {toast && <div className="toast" role="status">{toast}</div>}
+      {confirmation && <ConfirmModal {...confirmation} onCancel={() => setConfirmation(null)} />}
+      {shareOpen && <ShareModal
+        role={hostedRole}
+        isHosted={hostedRole !== null}
+        shareUrl={shareUrl}
+        loading={shareLoading}
+        copied={shareCopied}
+        error={shareError}
+        onPublish={publishAndShare}
+        onGenerate={generateShare}
+        onCopy={copyShareLink}
+        onClose={() => setShareOpen(false)}
+      />}
       <button type="button" className="mobile-panel-toggle" onClick={() => setAgentOpen((open) => !open)} aria-label="Toggle agent panel"><SidebarSimple size={20} /></button>
     </main>
   )

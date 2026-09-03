@@ -2,6 +2,9 @@ import type { Edge, Node } from '@xyflow/react'
 
 export type ElementKind = 'idea' | 'question' | 'insight' | 'action' | 'frame' | 'artifact'
 export type ElementColor = 'paper' | 'sun' | 'mint' | 'sky' | 'rose'
+export type BoardLayout = 'grid' | 'columns' | 'radial' | 'stacked'
+export type GroupLayout = 'none' | 'grid' | 'columns' | 'stacked'
+export type AgentColor = 'coral' | 'blue' | 'violet' | 'green' | 'amber' | 'pink' | 'cyan' | 'lime'
 
 export type ArtifactValue = string | number | boolean | null
 export type ArtifactFieldType = 'text' | 'number' | 'status' | 'tag' | 'boolean' | 'date' | 'url'
@@ -45,10 +48,16 @@ export type BoardNode = Node<BoardNodeData, 'boardElement'>
 export type BoardEdge = Edge
 
 export type BoardSnapshot = {
+  id: string
   name: string
   nodes: BoardNode[]
   edges: BoardEdge[]
+  createdAt: string
   updatedAt: string
+  sync?: {
+    nodeTombstones: Record<string, string>
+    edgeTombstones: Record<string, string>
+  }
 }
 
 export type Activity = {
@@ -56,16 +65,68 @@ export type Activity = {
   label: string
   detail: string
   source: 'human' | 'agent' | 'system'
+  actorName?: string
   createdAt: string
+  relatedElementIds?: string[]
 }
 
-export type ContributionKind = 'proposal' | 'question' | 'critique' | 'evidence' | 'decision' | 'reasoning_summary' | 'result' | 'board_action'
+export type LayerAction = 'front' | 'forward' | 'backward' | 'back'
+
+export type BoardSummary = {
+  id: string
+  name: string
+  createdAt: string
+  updatedAt: string
+  elementCount: number
+}
+
+export type HostedInvitation = {
+  inviteId: string
+  agentId: string
+  agentName: string
+  specialty?: string
+  inviteToken: string
+  agentUrl: string
+}
+
+export type HostedMuralAccess = {
+  board: BoardSnapshot
+  revision: number
+  ownerToken: string
+  userToken: string
+  ownerUrl: string
+  userUrl: string
+}
+
+export type ContributionKind = 'proposal' | 'question' | 'critique' | 'evidence' | 'decision' | 'note' | 'reasoning_summary' | 'result' | 'board_action' | 'checkpoint'
 
 export type RecordingParticipant = {
   id: string
   name: string
   role: 'human' | 'agent' | 'system'
   specialty?: string
+  status?: 'connecting' | 'active' | 'muted' | 'offline'
+  joinedAt?: string
+  lastSeenAt?: string
+  leaseExpiresAt?: string
+  watchingElementIds?: string[]
+  color?: AgentColor
+  focus?: AgentFocus
+}
+
+export type AgentFocus = {
+  state: 'editing' | 'reviewing'
+  intent: string
+  elementIds: string[]
+  claimedAt: string
+  leaseExpiresAt: string
+  releaseOnAction: 'after_write' | 'manual'
+}
+
+export type MuralFocusClaim = AgentFocus & {
+  participantId: string
+  participantName: string
+  color?: AgentColor
 }
 
 export type RecordingEvent = {
@@ -79,6 +140,10 @@ export type RecordingEvent = {
   replyTo?: string
   relatedElementIds?: string[]
   metadata?: Record<string, ArtifactValue>
+  checkpoint?: {
+    label: string
+    board: BoardSnapshot
+  }
 }
 
 export type RecordingSession = {
@@ -88,6 +153,8 @@ export type RecordingSession = {
   status: 'recording' | 'complete'
   startedAt: string
   completedAt?: string
+  boardId?: string
+  moderatorId: string
   participants: RecordingParticipant[]
   events: RecordingEvent[]
   finalOutput?: string
@@ -100,12 +167,19 @@ export type RecordingActions = {
   recordContribution: (input: {
     agentId: string
     agentName: string
-    kind: Exclude<ContributionKind, 'board_action'>
+    kind: ContributionKind
     content: string
     replyTo?: string
     relatedElementIds?: string[]
+    metadata?: Record<string, ArtifactValue>
   }) => RecordingEvent
-  recordUserMessage: (content: string, kind?: 'proposal' | 'question' | 'decision') => RecordingEvent
+  recordUserMessage: (content: string, kind?: 'proposal' | 'question' | 'decision' | 'note', relatedElementIds?: string[]) => RecordingEvent
+  moderateParticipant: (participantId: string, muted: boolean, moderatorId: string) => RecordingSession
+  watchParticipant: (participantId: string, elementIds?: string[], renewFocus?: boolean) => RecordingSession
+  setParticipantFocus: (participantId: string, focus: AgentFocus | null) => RecordingSession
+  createCheckpoint: (label: string, board: BoardSnapshot, actor?: RecordingParticipant) => RecordingEvent
+  updateCheckpoint: (eventId: string, label: string) => RecordingSession
+  removeCheckpoint: (eventId: string) => RecordingSession
   finalizeRecording: (finalOutput: string, actor?: RecordingParticipant) => RecordingSession
 }
 
@@ -138,8 +212,9 @@ export type BoardActions = {
     label?: string,
     source?: Activity['source'],
   ) => BoardEdge
-  arrange: (layout: 'grid' | 'columns' | 'radial', source?: Activity['source']) => void
-  createCluster: (name: string, elementIds: string[], source?: Activity['source']) => BoardNode
+  renameMural: (name: string, source?: Activity['source']) => BoardSnapshot
+  arrange: (layout: BoardLayout, source?: Activity['source']) => void
+  createCluster: (name: string, elementIds: string[], layout?: GroupLayout, source?: Activity['source']) => BoardNode
   createArtifact: (spec: ArtifactSpec, x?: number, y?: number, source?: Activity['source']) => BoardNode
   getArtifactSpec: (id: string) => ArtifactSpec
   updateArtifactRecords: (
@@ -149,5 +224,13 @@ export type BoardActions = {
     source?: Activity['source'],
   ) => BoardNode
   focusElements: (ids: string[]) => void
+  setElementLayer: (id: string, action: LayerAction, source?: Activity['source']) => BoardNode
   clear: (source?: Activity['source']) => void
+  createHostedMural: (name: string, initialBoard?: BoardSnapshot) => Promise<HostedMuralAccess>
+  createUserShare: (muralId: string, ownerToken: string) => Promise<{ userToken: string; userUrl: string }>
+  getAgentFocus: () => MuralFocusClaim[]
+  setAgentFocus: (participant: RecordingParticipant, focus: AgentFocus | null) => Promise<MuralFocusClaim[]>
+  assertAgentWritable: (participantId: string, elementIds: string[]) => Promise<void>
+  createAgentInvites: (muralId: string, ownerToken: string, guests: Array<{ agentId: string; agentName: string; specialty?: string }>) => Promise<HostedInvitation[]>
+  redeemAgentInvite: (muralId: string, inviteToken: string) => Promise<Omit<HostedInvitation, 'inviteToken' | 'agentUrl'> & { muralId: string; redeemedAt: string }>
 }

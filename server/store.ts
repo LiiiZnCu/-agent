@@ -18,6 +18,8 @@ export function saveSession(input: StoredSession) {
       title: session.title,
       status: session.status,
       startedAt: session.startedAt,
+      boardId: session.boardId,
+      moderatorId: session.moderatorId,
       completedAt: session.completedAt,
       finalOutput: session.finalOutput,
       boardJson: JSON.stringify(finalBoard),
@@ -27,6 +29,8 @@ export function saveSession(input: StoredSession) {
       set: {
         title: session.title,
         status: session.status,
+        boardId: session.boardId,
+        moderatorId: session.moderatorId,
         completedAt: session.completedAt,
         finalOutput: session.finalOutput,
         boardJson: JSON.stringify(finalBoard),
@@ -34,20 +38,31 @@ export function saveSession(input: StoredSession) {
       },
     }).run()
 
-    tx.delete(participants).where(eq(participants.sessionId, session.id)).run()
-    tx.delete(events).where(eq(events.sessionId, session.id)).run()
-
     if (session.participants.length) {
-      tx.insert(participants).values(session.participants.map((participant, index) => ({
-        sessionId: session.id,
-        id: participant.id,
-        sequence: index + 1,
-        name: participant.name,
-        role: participant.role,
-        specialty: participant.specialty,
-      }))).run()
+      session.participants.forEach((participant, index) => {
+        const values = {
+          sessionId: session.id,
+          id: participant.id,
+          sequence: index + 1,
+          name: participant.name,
+          role: participant.role,
+          specialty: participant.specialty,
+          status: participant.status ?? 'active',
+          joinedAt: participant.joinedAt,
+          lastSeenAt: participant.lastSeenAt,
+          leaseExpiresAt: participant.leaseExpiresAt,
+          watchingElementIdsJson: participant.watchingElementIds ? JSON.stringify(participant.watchingElementIds) : null,
+          color: participant.color,
+          focusJson: participant.focus ? JSON.stringify(participant.focus) : null,
+        }
+        tx.insert(participants).values(values).onConflictDoUpdate({
+          target: [participants.sessionId, participants.id],
+          set: values,
+        }).run()
+      })
     }
 
+    tx.delete(events).where(eq(events.sessionId, session.id)).run()
     if (session.events.length) {
       tx.insert(events).values(session.events.map((event, index) => ({
         id: event.id,
@@ -62,7 +77,8 @@ export function saveSession(input: StoredSession) {
         replyTo: event.replyTo,
         relatedElementIdsJson: event.relatedElementIds ? JSON.stringify(event.relatedElementIds) : null,
         metadataJson: event.metadata ? JSON.stringify(event.metadata) : null,
-      }))).run()
+        checkpointJson: event.checkpoint ? JSON.stringify(event.checkpoint) : null,
+      }))).onConflictDoNothing({ target: events.id }).run()
     }
   })
 }
@@ -80,6 +96,8 @@ export function getSession(id: string): StoredSession | null {
       title: stored.title,
       status: stored.status as RecordingSession['status'],
       startedAt: stored.startedAt,
+      boardId: stored.boardId ?? undefined,
+      moderatorId: stored.moderatorId,
       completedAt: stored.completedAt ?? undefined,
       finalOutput: stored.finalOutput ?? undefined,
       participants: storedParticipants.map((participant): RecordingParticipant => ({
@@ -87,6 +105,13 @@ export function getSession(id: string): StoredSession | null {
         name: participant.name,
         role: participant.role as RecordingParticipant['role'],
         specialty: participant.specialty ?? undefined,
+        status: participant.status as RecordingParticipant['status'],
+        joinedAt: participant.joinedAt ?? undefined,
+        lastSeenAt: participant.lastSeenAt ?? undefined,
+        leaseExpiresAt: participant.leaseExpiresAt ?? undefined,
+        watchingElementIds: participant.watchingElementIdsJson ? JSON.parse(participant.watchingElementIdsJson) as string[] : undefined,
+        color: participant.color as RecordingParticipant['color'] ?? undefined,
+        focus: participant.focusJson ? JSON.parse(participant.focusJson) as RecordingParticipant['focus'] : undefined,
       })),
       events: storedEvents.map((event) => ({
         id: event.id,
@@ -99,10 +124,16 @@ export function getSession(id: string): StoredSession | null {
         replyTo: event.replyTo ?? undefined,
         relatedElementIds: event.relatedElementIdsJson ? JSON.parse(event.relatedElementIdsJson) as string[] : undefined,
         metadata: event.metadataJson ? JSON.parse(event.metadataJson) as Record<string, string | number | boolean | null> : undefined,
+        checkpoint: event.checkpointJson ? JSON.parse(event.checkpointJson) as RecordingSession['events'][number]['checkpoint'] : undefined,
       })),
     },
     finalBoard: JSON.parse(stored.boardJson) as BoardSnapshot,
   }
+}
+
+export function getSessionByBoardId(boardId: string): StoredSession | null {
+  const stored = db.select({ id: sessions.id }).from(sessions).where(eq(sessions.boardId, boardId)).orderBy(desc(sessions.updatedAt)).limit(1).get()
+  return stored ? getSession(stored.id) : null
 }
 
 export function listSessions() {

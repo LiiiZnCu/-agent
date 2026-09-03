@@ -11,7 +11,9 @@ import {
   ThumbsUp,
 } from '@phosphor-icons/react'
 import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react'
-import type { ArtifactField, ArtifactSpec, ArtifactValue, BoardNode, ElementKind } from '../types'
+import type { CSSProperties } from 'react'
+import { AGENT_COLOR_HEX } from '../lib/recording'
+import type { AgentColor, ArtifactField, ArtifactSpec, ArtifactValue, BoardNode, ElementKind } from '../types'
 
 const KIND_META: Record<ElementKind, { label: string; icon: typeof Lightbulb }> = {
   idea: { label: 'Idea', icon: Lightbulb },
@@ -102,12 +104,15 @@ export function BoardElement({ data, selected }: NodeProps<BoardNode>) {
   const Icon = meta.icon
   const isFrame = data.kind === 'frame'
   const isArtifact = data.kind === 'artifact' && data.artifact
+  const focus = data._focusPresence as { participantName: string; intent: string; color: AgentColor; state: 'editing' | 'reviewing' } | undefined
 
   return (
     <div
-      className={`board-element kind-${data.kind} color-${data.color} ${selected ? 'is-selected' : ''} ${data.justCreated ? 'is-new' : ''}`}
+      className={`board-element kind-${data.kind} color-${data.color} ${selected ? 'is-selected' : ''} ${data.justCreated ? 'is-new' : ''} ${focus ? `has-agent-focus focus-${focus.state}` : ''}`}
+      style={focus ? { '--agent-focus-color': AGENT_COLOR_HEX[focus.color] } as CSSProperties : undefined}
       data-testid={`board-element-${data.kind}`}
     >
+      {focus && <div className="agent-focus-badge" title={focus.intent}><span />{focus.participantName} {focus.state === 'editing' ? 'is editing' : 'is reviewing'}</div>}
       <NodeResizer
         color="#f06449"
         isVisible={selected}

@@ -10,6 +10,7 @@ import {
   QuestionMark,
   Table,
 } from '@phosphor-icons/react'
+import type { MouseEvent } from 'react'
 import type { ElementKind } from '../types'
 
 type Props = {
@@ -18,6 +19,11 @@ type Props = {
 }
 
 export function ToolRail({ onAdd, onArtifact }: Props) {
+  const chooseArtifact = (event: MouseEvent<HTMLButtonElement>, template: 'decision' | 'cards' | 'checklist') => {
+    onArtifact(template)
+    event.currentTarget.closest('details')?.removeAttribute('open')
+  }
+
   return (
     <aside className="tool-rail" aria-label="Canvas tools">
       <button className="tool-button is-active" type="button" aria-label="Select and move" data-tooltip="Select">
@@ -48,9 +54,9 @@ export function ToolRail({ onAdd, onArtifact }: Props) {
         <div className="artifact-menu-popover">
           <strong>Structured artifact</strong>
           <span>Reusable data with a readable spec.</span>
-          <button type="button" onClick={() => onArtifact('decision')}><Table size={17} />Decision matrix</button>
-          <button type="button" onClick={() => onArtifact('cards')}><CardsThree size={17} />Concept cards</button>
-          <button type="button" onClick={() => onArtifact('checklist')}><ListChecks size={17} />Checklist</button>
+          <button type="button" onClick={(event) => chooseArtifact(event, 'decision')}><Table size={17} />Decision matrix</button>
+          <button type="button" onClick={(event) => chooseArtifact(event, 'cards')}><CardsThree size={17} />Concept cards</button>
+          <button type="button" onClick={(event) => chooseArtifact(event, 'checklist')}><ListChecks size={17} />Checklist</button>
         </div>
       </details>
     </aside>
