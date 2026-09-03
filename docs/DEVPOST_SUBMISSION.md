@@ -6,7 +6,7 @@ Canvas Relay is a visual thinking workspace where people and browser agents buil
 
 ## Why WebMCP
 
-Visual collaboration apps normally force agents to guess coordinates, click through menus, or produce text that a human must manually reconstruct. Canvas Relay exposes the board's real concepts through 24 WebMCP tools: hosted murals, separate human and agent access, ideas, questions, actions, clusters, connections, layers, structured artifacts, anchored comments, participants, renewable watch leases, moderation, and decision-trace events.
+Visual collaboration apps normally force agents to guess coordinates, click through menus, or produce text that a human must manually reconstruct. Canvas Relay exposes the board's real concepts through 27 WebMCP tools: hosted murals, separate human and agent access, ideas, questions, actions, clusters, connections, layers, structured artifacts, anchored comments, edit-focus leases, replay checkpoints, participants, renewable watch leases, moderation, and decision-trace events.
 
 The agent works through stable structured operations while the person sees and controls every change on the canvas. Both use the same action layer, so there is no hidden agent-only state.
 
@@ -19,6 +19,8 @@ The agent works through stable structured operations while the person sees and c
 - People and agents can leave reviewable comments on any element; every anchored note also appears in the global conversation.
 - The agent that creates a session becomes its moderator and can mute or reactivate another participant through a private capability, rather than trusting a visible ID.
 - Agents can renew a watch lease, poll changes globally or for selected components, and stop automatically when the session closes.
+- Distinct agent colors and expiring edit-focus claims show who is working where and prevent conflicting agent mutations.
+- Moderators and users can capture, rename, remove, and replay mural checkpoints without replacing the live board.
 - A GPT can create an online mural, return a separate human URL, and issue one private capability URL per invited agent.
 - Every mural has a UUID, portable board-plus-trace import/export, and a dedicated URL that can stay open as a separate synchronized instance.
 - The finished decision trace can be exported as JSON, Markdown, or CSV with the final board snapshot.
@@ -32,11 +34,11 @@ The app is React + Vite with React Flow. It is offline-first: boards and the act
 ## Demo video outline (under 3 minutes)
 
 1. **0:00-0:20 — Problem and promise.** Show the canvas and explain that agents usually cannot manipulate the semantic structure of a visual workspace reliably.
-2. **0:20-0:45 — WebMCP surface.** Open the Agent panel and show the 24 registered tools, including hosted-mural, invitation, artifact, comment, layering, watch, recording, and moderation operations.
+2. **0:20-0:45 — WebMCP surface.** Open the Agent panel and show the 27 registered tools, including hosted-mural, invitation, artifact, focus, checkpoint, comment, watch, recording, and moderation operations.
 3. **0:45-1:25 — Agent builds.** Ask an agent to add ideas, cluster them, connect a central goal, and create a decision matrix. Show each action appearing live.
 4. **1:25-2:05 — Multi-agent trace.** Start recording, let Explorer propose, Critic challenge, and Synthesizer decide. Add one human constraint and point out that all participants are visible.
 5. **2:05-2:30 — Reusable artifacts.** Inspect the decision matrix and show Artifact Spec 1.0 fields and primitive records.
-6. **2:30-2:50 — Persistence and export.** Finish the trace, show SQLite sync, then export Markdown or CSV.
+6. **2:30-2:50 — Replay and export.** Save two checkpoints, use Previous and Next to replay the process, then export the SQLite-backed trace.
 7. **2:50-2:58 — Close.** “Canvas Relay turns a visual board into a shared, inspectable action surface for people and agents.”
 
 ## Submission checklist

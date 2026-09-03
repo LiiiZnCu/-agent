@@ -33,12 +33,15 @@ npm run preview
 - Pan, zoom, select, drag, resize, and connect elements on an infinite canvas.
 - Add ideas, questions, insights, actions, frames, decision matrices, concept cards, and checklists.
 - Edit element content, colors, votes, clusters, and positions.
-- Organize the board as a grid, semantic columns, or a radial map.
+- Organize the board as a grid, semantic columns, radial map, or compact stack.
 - Undo and redo human or agent mutations.
 - Change element layers from the inspector, keyboard, or right-click menu.
 - Keep a local library of UUID murals, open them in separate instances, and import or export portable JSON.
 - Record a visible multi-agent discussion with participant identity, replies, canvas actions, decisions, and final output.
 - Let the agent that creates a WebMCP session moderate it and mute or reactivate participants.
+- Give agents distinct colors and renewable edit-focus leases that prevent overlapping work.
+- Save editable timeline checkpoints and replay the mural non-destructively with Previous and Next controls.
+- Publish a local mural and create or rotate private collaborator links from the Share dialog.
 - Export a decision trace as JSON, Markdown, or CSV.
 - Reload the page without losing the board.
 
@@ -69,23 +72,26 @@ Test with either:
 - ChatGPT desktop's in-app browser.
 - Google Chrome 149 or newer with `chrome://flags/#enable-webmcp-testing` enabled.
 
-The twenty-four registered tools are:
+The twenty-seven registered tools are:
 
 | Tool | Purpose |
 | --- | --- |
 | `canvas_create_mural` | Create a hosted mural plus separate owner and user links. |
 | `canvas_get_board` | Read elements, artifact specs, and connections. |
+| `canvas_rename_mural` | Rename the mural shown beside the logo and in exports. |
 | `canvas_add_element` | Add one visual element. |
 | `canvas_add_elements` | Add up to 30 elements in one action. |
 | `canvas_update_element` | Edit content, type, style, votes, cluster, or position. |
 | `canvas_connect_elements` | Draw a labeled relationship. |
 | `canvas_remove_elements` | Remove elements and attached connections. |
-| `canvas_arrange_board` | Apply grid, semantic columns, or radial layout. |
-| `canvas_create_cluster` | Add a labeled frame around related elements. |
+| `canvas_arrange_board` | Apply grid, semantic columns, radial, or stacked layout. |
+| `canvas_create_cluster` | Add a labeled container and optionally arrange its members. |
 | `canvas_create_artifact` | Create a reusable structured artifact. |
 | `canvas_get_artifact_spec` | Read an artifact's fields, records, and presentation. |
 | `canvas_update_artifact_records` | Replace or append artifact records. |
 | `canvas_focus_elements` | Select and bring elements into view. |
+| `canvas_set_focus` | Claim or release a visible, expiring edit/review focus lease. |
+| `canvas_add_checkpoint` | Let the moderator capture a replayable mural milestone. |
 | `canvas_set_element_layer` | Move an element through the visual z stack. |
 | `canvas_start_recording` | Start a trace; the creating agent becomes moderator. |
 | `canvas_join_session` | Join a mural by UUID and appear in the participant list. |
@@ -105,8 +111,9 @@ Recommended agent sequence:
 1. For a new online collaboration, call `canvas_create_mural`; retain its owner capability and give the separate `userUrl` to the person.
 2. Create named guest links with `canvas_invite_agents`. Each invited agent opens only its own URL and calls `canvas_redeem_agent_invite`.
 3. Include `muralId`, `agentId`, and `agentToken` in protected write and watch calls. Moderation additionally uses the creator's `moderatorToken` capability.
-4. Repeat `canvas_watch_mural` at its recommended interval to receive changes and know when the session closes. Use review triggers, a quiet period, and a cooldown so agents do not answer their own events or interrupt one another.
-5. Share conclusions with `canvas_record_contribution`; the moderator can use `canvas_moderate_participant` when needed.
+4. Claim the elements about to be edited with `canvas_set_focus`; default to `releaseOnAction: after_write`, or renew a manual lease through `canvas_watch_mural`.
+5. Repeat `canvas_watch_mural` at its recommended interval to receive changes and know when the session closes. Use review triggers, a quiet period, and a cooldown so agents do not answer their own events or interrupt one another.
+6. Save meaningful milestones with `canvas_add_checkpoint`. Share conclusions with `canvas_record_contribution`; the moderator can use `canvas_moderate_participant` when needed.
 
 ## Artifact Spec 1.0
 

@@ -321,7 +321,7 @@ function Workspace() {
     setHistoryStatus({ canUndo: true, canRedo: false })
   }, [snapshotNow])
 
-  const applySnapshot = useCallback((snapshot: BoardSnapshot) => {
+  const applySnapshot = useCallback((snapshot: BoardSnapshot, preserveSelection = false) => {
     const copy = copySnapshot(snapshot)
     if (copy.sync) {
       nodeTombstonesRef.current = { ...nodeTombstonesRef.current, ...copy.sync.nodeTombstones }
@@ -350,6 +350,10 @@ function Workspace() {
       const previousEdges = new Map(edgesRef.current.map((edge) => [edge.id, edge]))
       copy.edges = copy.edges.map((edge) => previousEdges.has(edge.id) ? edge : { ...edge, data: { ...(edge.data ?? {}), _syncVersion: version } })
     }
+    if (preserveSelection) {
+      const selectedIds = new Set(nodesRef.current.filter((node) => node.selected).map((node) => node.id))
+      copy.nodes = copy.nodes.map((node) => selectedIds.has(node.id) ? { ...node, selected: true } : node)
+    }
     boardIdRef.current = copy.id
     boardCreatedAtRef.current = copy.createdAt
     nameRef.current = copy.name
@@ -361,8 +365,12 @@ function Workspace() {
     setNameDraft(copy.name)
     setNodes(copy.nodes)
     setEdges(copy.edges)
-    setSelectedId(null)
-    setLayerMenu(null)
+    if (!preserveSelection) {
+      setSelectedId(null)
+      setLayerMenu(null)
+    } else {
+      setSelectedId((current) => current && copy.nodes.some((node) => node.id === current) ? current : null)
+    }
   }, [instanceId])
 
   const undo = useCallback(() => {
@@ -924,10 +932,16 @@ function Workspace() {
       return
     }
     const timer = window.setTimeout(() => {
-      saveHostedMural(snapshotNow(), hostedAccessToken).then((saved) => {
+      const pending = snapshotNow()
+      saveHostedMural(pending, hostedAccessToken).then((saved) => {
         hostedRevisionRef.current = saved.revision
-        hostedPullRef.current = true
-        applySnapshot(saved.board)
+        const canonicalChanged = saved.board.name !== pending.name
+          || JSON.stringify(saved.board.nodes) !== JSON.stringify(pending.nodes)
+          || JSON.stringify(saved.board.edges) !== JSON.stringify(pending.edges)
+        if (canonicalChanged) {
+          hostedPullRef.current = true
+          applySnapshot(saved.board, true)
+        }
         setBackendState('synced')
       }).catch(() => setBackendState('offline'))
     }, 420)
@@ -947,7 +961,7 @@ function Workspace() {
         if (hosted.revision > hostedRevisionRef.current) {
           hostedRevisionRef.current = hosted.revision
           hostedPullRef.current = true
-          applySnapshot(hosted.board)
+          applySnapshot(hosted.board, true)
         }
         setHostedRole(hosted.role)
         setHostedFocusClaims(hosted.focusClaims)
@@ -1488,7 +1502,6 @@ function Workspace() {
         <div className="brand-lockup">
           <div className="brand-mark header-mark" role="img" aria-label="Canvas Relay"><span /><span /><span /></div>
           <div className="board-title-wrap">
-            <span className="product-name">Canvas Relay</span>
             <input
               value={nameDraft}
               maxLength={80}
@@ -1553,7 +1566,7 @@ function Workspace() {
 
       <section className={`workspace ${replayBoard ? 'is-replaying' : ''}`}>
         <ToolRail onAdd={addKind} onArtifact={addArtifact} />
-        <div className="canvas-wrap">
+        <div className="canvas-wrap" data-focus-count={activeFocusClaims.length}>
           <ReactFlow<BoardNode, BoardEdge>
             nodes={replayBoard?.nodes ?? renderedNodes}
             edges={replayBoard?.edges ?? edges}
