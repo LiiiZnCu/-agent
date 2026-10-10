@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentSuggestion, BoardActions, BoardSnapshot } from '../types'
-import { createBrainstormSession, createIdeaMeta, setBrainstormStage } from './brainstorm'
+import { createBrainstormSession, createIdeaMeta, isOutcomeConfirmed, setBrainstormStage } from './brainstorm'
 import { createBoardNode, createBoardEdge } from './board'
 import * as agent from './brainstorm-actions'
 import { validateBrainstormPayload } from './brainstorm-validation'
@@ -9,6 +9,14 @@ const time = '2026-10-10T00:00:00.000Z'
 function fixture() {
   const session = createBrainstormSession({ id: 's', boardId: 'b', topic: '社区', goal: '行动', memberId: 'm', memberName: '林', createdAt: time })
   const board: BoardSnapshot = { id: 'b', name: '社区', brainstormSessionId: 's', createdAt: time, updatedAt: time, edges: [], nodes: ['a', 'b'].map((id) => ({ ...createBoardNode({ title: id }), id, data: { ...createBoardNode({ title: id }).data, ideaMeta: createIdeaMeta({ sessionId: 's', authorId: 'm', type: 'idea', createdAt: time }) } })) }
+  return { board, session }
+}
+function confirmedFixture() {
+  const { board, session } = fixture()
+  board.nodes[0].data.ideaMeta!.type = 'proposal'
+  session.proposals = [{ id: 'a', title: 'a', description: '', integrationLogic: '', sourceIdeaIds: [], authorId: 'm', risks: [], openQuestions: [], comments: [], status: 'accepted' }]
+  session.decision = { criteria: [], scores: [], votes: [], finalProposalId: 'a', confirmedBy: 'm', confirmedAt: time }
+  session.outcome = { draft: '人工草稿', finalProposalId: 'a', actions: [{ title: '人工行动', ownerId: 'm', dueAt: '2026-11-01' }], updatedAt: time }
   return { board, session }
 }
 const actions = [
@@ -51,7 +59,7 @@ describe('AI 建议确认', () => {
     expect(accepted.suggestions[0].boardBeforeAccept).toEqual(before)
     expect(accepted.suggestions[0].sessionBeforeAccept?.topic).toBe('社区')
     expect(accepted.suggestions[0].status).toBe('accepted')
-    if (action.type === 'create_cluster') expect(calls).toEqual(['cluster'])
+    if (action.type === 'create_cluster') expect(calls).toEqual(['cluster', 'update'])
     if (action.type === 'connect_ideas') { expect(calls).toEqual(['connect']); expect(board.edges[0]).toMatchObject({ source: 'a', target: 'b', label: '互补' }) }
     if (action.type === 'ask_question') expect(board.nodes[2].data).toMatchObject({ kind: 'question', title: '谁负责？', ideaMeta: { sourceIdeaIds: ['a', 'b'] } })
     if (action.type === 'suggest_merge') expect(accepted.proposals[0]).toMatchObject({ status: 'draft', sourceIdeaIds: ['a', 'b'], integrationLogic: '组合理由', risks: ['风险'], openQuestions: ['待确认'] })
@@ -142,5 +150,34 @@ describe('AI 建议确认', () => {
     const pending = agent.receiveSuggestion(session, board, { message: '回复', actions: [actions[2]] }, 'quiet_period', [])
     table.data.artifact.records[0].selected = '之后'
     expect(() => agent.acceptSuggestion(pending, pending.suggestions[0].id, api)).toThrow('已变化')
+  })
+  it.each([actions[2], actions[0]])('接受 $type 保留人工最终确认', (action) => {
+    const { board, session } = confirmedFixture(); const { api } = layer(board)
+    expect(isOutcomeConfirmed(session)).toBe(true)
+    const pending = agent.receiveSuggestion(session, board, { message: '回复', actions: [action] }, 'quiet_period', ['a', 'b'])
+    const accepted = agent.acceptSuggestion(pending, pending.suggestions[0].id, api)
+    expect(accepted.decision).toEqual(session.decision)
+    expect(isOutcomeConfirmed(accepted)).toBe(true)
+  })
+  it('成果建议只更新草稿，保留人工选择、行动安排和确认', () => {
+    const { board, session } = confirmedFixture(); const { api } = layer(board)
+    const pending = agent.receiveSuggestion(session, board, { message: '回复', actions: [actions[5]] }, 'quiet_period', [])
+    const accepted = agent.acceptSuggestion(pending, pending.suggestions[0].id, api)
+    expect(accepted.outcome?.finalProposalId).toBe('a')
+    expect(accepted.outcome?.actions).toEqual([{ title: '人工行动', ownerId: 'm', dueAt: '2026-11-01' }])
+    expect(accepted.outcome?.draft).toBe('草稿内容')
+    expect(accepted.decision).toEqual(session.decision)
+    expect(isOutcomeConfirmed(accepted)).toBe(true)
+  })
+  it('分类框保留来源观点及不同作者来源', () => {
+    const { board, session } = fixture(); const { api } = layer(board)
+    session.members.push({ id: 'other', name: '夏', role: 'member', joinedAt: time })
+    board.nodes[1].data.ideaMeta!.authorId = 'other'
+    const pending = agent.receiveSuggestion(session, board, { message: '分类', actions: [actions[0]] }, 'similar_ideas', ['a', 'b'])
+    agent.acceptSuggestion(pending, pending.suggestions[0].id, api)
+    const frame = board.nodes.find((node) => node.data.kind === 'frame')!
+    expect(frame.data.ideaMeta).toMatchObject({ authorId: 'm', sourceIdeaIds: ['a', 'b'] })
+    expect(frame.data.body).toContain('林'); expect(frame.data.body).toContain('夏')
+    expect(frame.data.body).toContain('other')
   })
 })

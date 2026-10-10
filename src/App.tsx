@@ -418,7 +418,7 @@ function Workspace() {
   const undo = useCallback(() => {
     const previous = historyRef.current.pop()
     if (!previous) return
-    futureRef.current = [{ board: copySnapshot(snapshotNow()), discussion: structuredClone(sessionRef.current) }, ...futureRef.current.slice(0, 39)]
+    futureRef.current = [{ board: copySnapshot(snapshotNow()), discussion: structuredClone(sessionRef.current), aiSuggestionId: previous.aiSuggestionId }, ...futureRef.current.slice(0, 39)]
     applySnapshot(previous.board, true)
     sessionRef.current = previous.discussion
     setSession(previous.discussion)
@@ -429,7 +429,7 @@ function Workspace() {
   const redo = useCallback(() => {
     const next = futureRef.current.shift()
     if (!next) return
-    historyRef.current.push({ board: copySnapshot(snapshotNow()), discussion: structuredClone(sessionRef.current) })
+    historyRef.current.push({ board: copySnapshot(snapshotNow()), discussion: structuredClone(sessionRef.current), aiSuggestionId: next.aiSuggestionId })
     applySnapshot(next.board, true)
     sessionRef.current = next.discussion
     setSession(next.discussion)
@@ -1241,15 +1241,18 @@ function Workspace() {
     if (!discussion || suggestionRequestRef.current) throw new Error('当前不能撤销建议。')
     const restored = undoSuggestion(discussion, snapshotNow(), id)
     validateBrainstormPayload(restored)
+    const retired = restored.session.suggestions.find((item) => item.id === id)!
     // 同时移除这一笔接受历史并更新后续快照，普通撤销不会重新带回 AI 内容。
     const rebase = (entry: HistoryEntry): HistoryEntry => {
-      if (!entry.discussion?.suggestions.some((item) => item.id === id && item.status === 'accepted')) return entry
-      const next = undoSuggestion(entry.discussion, entry.board, id)
+      if (entry.board.id !== restored.board.id || entry.discussion?.id !== discussion.id || !entry.discussion.suggestions.some((item) => item.id === id)) return entry
+      const next = entry.discussion.suggestions.some((item) => item.id === id && item.status === 'accepted')
+        ? undoSuggestion(entry.discussion, entry.board, id)
+        : { board: entry.board, session: { ...entry.discussion, suggestions: entry.discussion.suggestions.map((item) => item.id === id ? structuredClone(retired) : item) } }
       validateBrainstormPayload(next)
       return { ...entry, board: next.board, discussion: next.session }
     }
     const history = historyRef.current.filter((entry) => entry.aiSuggestionId !== id).map(rebase)
-    const future = futureRef.current.map(rebase)
+    const future = futureRef.current.filter((entry) => entry.aiSuggestionId !== id).map(rebase)
     applySnapshot(restored.board, true)
     sessionRef.current = restored.session
     setSession(restored.session)

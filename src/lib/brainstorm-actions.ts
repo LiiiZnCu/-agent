@@ -71,13 +71,23 @@ export function acceptSuggestion(session: BrainstormSession, id: string, layer: 
   // 全部动作在执行前验证，避免先执行有效动作再发现后面的错误。
   const actions = suggestion.actions.map((action) => validateBrainstormAction(action, before, session.id))
   actions.filter((action) => action.type === 'create_matrix').forEach((action) => validateArtifactSpec(matrixSpec(action)))
-  let next = structuredClone(session)
+  const next = structuredClone(session)
   const createdAt = new Date().toISOString()
   const contextualIds = suggestion.selectedIdeaIds?.length ? suggestion.selectedIdeaIds : before.nodes.filter((node) => node.data.ideaMeta?.sessionId === session.id).map((node) => node.id)
   const markSource = (id: string, type: 'question' | 'proposal' | 'evidence', ids: string[]) => layer.updateElement(id, { ideaMeta: createIdeaMeta({ sessionId: session.id, authorId: session.currentMemberId, type, sourceIdeaIds: ids, createdAt }) }, 'agent')
   for (const action of actions) {
     switch (action.type) {
-      case 'create_cluster': layer.createCluster(action.label as string, action.ideaIds as string[], 'none', 'agent'); break
+      case 'create_cluster': {
+        const ids = action.ideaIds as string[]
+        const origins = ids.map((id) => {
+          const idea = before.nodes.find((node) => node.id === id)!
+          const author = session.members.find((member) => member.id === idea.data.ideaMeta!.authorId)!
+          return `${idea.data.title}（观点 ID：${id}，作者：${author.name}，成员 ID：${author.id}）`
+        })
+        const frame = layer.createCluster(action.label as string, ids, 'none', 'agent')
+        layer.updateElement(frame.id, { body: origins.join('\n'), ideaMeta: createIdeaMeta({ sessionId: session.id, authorId: session.currentMemberId, type: 'evidence', sourceIdeaIds: ids, createdAt }) }, 'agent')
+        break
+      }
       case 'connect_ideas': layer.connectElements(action.fromId as string, action.toId as string, action.label as string, 'agent'); break
       case 'ask_question': {
         const node = layer.addElement({ title: action.question as string, kind: 'question', ideaType: 'question' }, 'agent')
@@ -92,10 +102,10 @@ export function acceptSuggestion(session: BrainstormSession, id: string, layer: 
         const node = layer.createArtifact(matrixSpec(action), undefined, undefined, 'agent')
         markSource(node.id, 'evidence', contextualIds); break
       }
-      case 'create_summary': next.outcome = { draft: action.summary as string, actions: [], updatedAt: createdAt }; break
+      case 'create_summary': next.outcome = next.outcome ? { ...next.outcome, draft: action.summary as string, updatedAt: createdAt } : { draft: action.summary as string, actions: [], updatedAt: createdAt }; break
     }
   }
-  next = { ...next, updatedAt: createdAt, decision: next.decision ? { ...next.decision, confirmedAt: undefined, confirmedBy: undefined } : null }
+  next.updatedAt = createdAt
   return { ...next, suggestions: next.suggestions.map((item) => item.id === id ? { ...item, status: 'accepted', boardBeforeAccept: before, sessionBeforeAccept: sessionSnapshot(session), boardAfterAccept: layer.getSnapshot(), sessionAfterAccept: sessionSnapshot(next) } : item) }
 }
 
