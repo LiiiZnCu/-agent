@@ -50,6 +50,13 @@ export async function loadBrainstormSession(id: string, accessToken = '') {
   return validateBrainstormPayload(payload, id)
 }
 
+export async function requestBrainstormSuggestions(id: string, purpose: string, ideaIds: string[], accessToken = ''): Promise<unknown> {
+  return jsonResponse<unknown>(await fetch(`/api/brainstorm/${encodeURIComponent(id)}/suggestions`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
+    body: JSON.stringify({ purpose, ...(ideaIds.length ? { ideaIds } : {}) }),
+  }))
+}
+
 export async function createHostedMural(name: string, board?: BoardSnapshot) {
   return jsonResponse<HostedMuralAccess>(await fetch('/api/murals', {
     method: 'POST',

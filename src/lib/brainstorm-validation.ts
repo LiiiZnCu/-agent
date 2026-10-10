@@ -70,6 +70,7 @@ export function validateBrainstormPayload(value: unknown, expectedId?: string): 
     || (board.brainstormSessionId !== undefined && board.brainstormSessionId !== session.id)
     || !text(session.topic, false) || !text(session.goal, false) || !text(session.background) || !text(session.constraints)
     || !enumeration(session.stage, stages) || typeof session.aiPaused !== 'boolean'
+    || !optional(session.pausedStages, (value) => list(value, (stage) => enumeration(stage, stages)) && new Set(value).size === value.length)
     || !date(session.createdAt) || !date(session.updatedAt)
     || !uniqueRecords(session.members, (member) => text(member.name, false) && enumeration(member.role, ['facilitator', 'member']) && date(member.joinedAt))
     || !session.members.length) return invalid()
@@ -81,10 +82,35 @@ export function validateBrainstormPayload(value: unknown, expectedId?: string): 
     && strings(proposal.risks) && strings(proposal.openQuestions) && enumeration(proposal.status, ['draft', 'accepted', 'rejected'])
     && uniqueRecords(proposal.comments, (comment) => memberIds.has(comment.authorId) && enumeration(comment.kind, ['support', 'oppose', 'supplement', 'risk', 'verify']) && text(comment.content) && date(comment.createdAt)))) return invalid()
   const proposalIds = new Set(session.proposals.map((proposal) => proposal.id))
-  if (!uniqueRecords(session.suggestions, (suggestion) => enumeration(suggestion.trigger, ['manual', 'stage', 'board_change'])
-    && text(suggestion.message) && enumeration(suggestion.status, ['pending', 'accepted', 'rejected', 'ignored'])
+  const validSessionSnapshot = (snapshot: unknown, snapshotBoard: unknown) => {
+    if (!record(snapshot) || 'suggestions' in snapshot || snapshot.id !== session.id || snapshot.boardId !== board.id || !isSnapshot(snapshotBoard)) return false
+    try { validateBrainstormPayload({ board: snapshotBoard, session: { ...snapshot, suggestions: [] } }, session.id as string); return true } catch { return false }
+  }
+  const completeSuggestion = (suggestion: RecordValue) => {
+    if (!['similar_ideas', 'quiet_period', 'complementary_ideas'].includes(suggestion.trigger as string)) return true
+    const requestBoard = suggestion.boardAtRequest
+    if (!enumeration(suggestion.stage, stages) || typeof suggestion.context !== 'string' || !isSnapshot(requestBoard)
+      || !list(suggestion.selectedIdeaIds, (source) => id(source) && requestBoard.nodes.some((node) => node.id === source && node.data.ideaMeta?.sessionId === session.id))) return false
+    if (['accepted', 'undone'].includes(suggestion.status as string) && (!suggestion.boardBeforeAccept || !suggestion.boardAfterAccept || !suggestion.sessionBeforeAccept || !suggestion.sessionAfterAccept)) return false
+    try {
+      const context: unknown = JSON.parse(suggestion.context)
+      if (!record(context) || !record(context.board) || context.board.id !== board.id || !record(context.session) || context.session.id !== session.id || context.session.boardId !== board.id) return false
+      validateBrainstormPayload({ board: { ...context.board, updatedAt: suggestion.createdAt }, session: { ...context.session, updatedAt: suggestion.createdAt, aiPaused: false, suggestions: [] } }, session.id as string)
+      return true
+    } catch { return false }
+  }
+  if (!uniqueRecords(session.suggestions, (suggestion) => enumeration(suggestion.trigger, ['manual', 'stage', 'board_change', 'similar_ideas', 'quiet_period', 'complementary_ideas'])
+    && completeSuggestion(suggestion)
+    && text(suggestion.message) && enumeration(suggestion.status, ['pending', 'accepted', 'rejected', 'ignored', 'deferred', 'undone'])
+    && optional(suggestion.stage, (stage) => enumeration(stage, stages))
+    && optional(suggestion.context, (context) => typeof context === 'string' && context.length > 0 && context.length <= 3_000_000)
+    && optional(suggestion.selectedIdeaIds, (ids) => list(ids, id) && new Set(ids).size === ids.length)
+    && optional(suggestion.boardAtRequest, (snapshot) => isSnapshot(snapshot) && snapshot.id === board.id && validIdeaMetadata(snapshot, session, memberIds))
     && optional(suggestion.boardBeforeAccept, (snapshot) => isSnapshot(snapshot) && snapshot.id === board.id && validIdeaMetadata(snapshot, session, memberIds))
-    && validActions(suggestion.actions, (suggestion.boardBeforeAccept as BoardSnapshot | undefined) ?? board, session.id as string)
+    && optional(suggestion.boardAfterAccept, (snapshot) => isSnapshot(snapshot) && snapshot.id === board.id)
+    && optional(suggestion.sessionBeforeAccept, (snapshot) => validSessionSnapshot(snapshot, suggestion.boardBeforeAccept))
+    && optional(suggestion.sessionAfterAccept, (snapshot) => validSessionSnapshot(snapshot, suggestion.boardAfterAccept))
+    && validActions(suggestion.actions, (suggestion.boardBeforeAccept as BoardSnapshot | undefined) ?? (suggestion.boardAtRequest as BoardSnapshot | undefined) ?? board, session.id as string)
     && list(suggestion.ignoredActionTypes, (type) => enumeration(type, actionTypes))
     && typeof suggestion.pausedForStage === 'boolean' && date(suggestion.createdAt)
   )) return invalid()

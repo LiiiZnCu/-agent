@@ -46,7 +46,9 @@ import { createArtifactTemplate, validateArtifactSpec } from './lib/artifacts'
 import { arrangeGroupNodes, arrangeNodes, calculateClusterBounds, createBoardEdge, createBoardNode, createEmptyBoard, createId, createUUID, moveNodeLayer, serializeSnapshot } from './lib/board'
 import { importCanvasRelay, listBoards, loadBoard, loadBoardById } from './lib/storage'
 import { loadBrainstorm, saveBrainstormBoard } from './lib/brainstorm-storage'
-import { assertHostedWritable, createAgentInvites as createHostedAgentInvites, createHostedMural as createHostedMuralApi, createUserShare as createHostedUserShare, getBackendHealth, loadHostedMural, redeemAgentInvite as redeemHostedAgentInvite, saveHostedMural, setHostedFocus, syncBrainstorm, syncRecording } from './lib/api'
+import { acceptSuggestion, receiveSuggestion, suggestionContext, undoSuggestion, visibleSuggestions } from './lib/brainstorm-actions'
+import { validateBrainstormPayload } from './lib/brainstorm-validation'
+import { assertHostedWritable, createAgentInvites as createHostedAgentInvites, createHostedMural as createHostedMuralApi, createUserShare as createHostedUserShare, getBackendHealth, loadHostedMural, redeemAgentInvite as redeemHostedAgentInvite, requestBrainstormSuggestions, saveHostedMural, setHostedFocus, syncBrainstorm, syncRecording } from './lib/api'
 import { activeFocusParticipants, addRecordingCheckpoint, appendEvent, completeRecording, createRecordingSession, deleteRecordingCheckpoint, joinRecording, loadRecording, moderateRecording, recordingToCsv, recordingToMarkdown, renameRecordingCheckpoint, saveRecording, setRecordingFocus, watchRecording } from './lib/recording'
 import { registerWebMCP, TOOL_CATALOG } from './lib/webmcp'
 import type {
@@ -65,10 +67,11 @@ import type {
   MuralFocusClaim,
   RecordingActions,
   RecordingSession,
+  SuggestionReason,
 } from './types'
 
 const NODE_TYPES = { boardElement: BoardElement }
-type HistoryEntry = { board: BoardSnapshot; discussion: BrainstormSession | null }
+type HistoryEntry = { board: BoardSnapshot; discussion: BrainstormSession | null; aiSuggestionId?: string }
 
 function copySnapshot(snapshot: BoardSnapshot): BoardSnapshot {
   return structuredClone(snapshot)
@@ -156,6 +159,8 @@ function Workspace() {
   const historyRef = useRef<HistoryEntry[]>([])
   const futureRef = useRef<HistoryEntry[]>([])
   const sessionRef = useRef(session)
+  const aiTransactionRef = useRef(false)
+  const suggestionRequestRef = useRef(false)
   const recordingRef = useRef(recording)
   const broadcastRef = useRef<BroadcastChannel | null>(null)
   const remoteSyncRef = useRef(false)
@@ -349,6 +354,7 @@ function Workspace() {
   }, [])
 
   const recordHistory = useCallback(() => {
+    if (aiTransactionRef.current) return
     historyRef.current = [...historyRef.current.slice(-39), { board: copySnapshot(snapshotNow()), discussion: structuredClone(sessionRef.current) }]
     futureRef.current = []
     setHistoryStatus({ canUndo: true, canRedo: false })
@@ -414,6 +420,7 @@ function Workspace() {
     if (!previous) return
     futureRef.current = [{ board: copySnapshot(snapshotNow()), discussion: structuredClone(sessionRef.current) }, ...futureRef.current.slice(0, 39)]
     applySnapshot(previous.board, true)
+    sessionRef.current = previous.discussion
     setSession(previous.discussion)
     setHistoryStatus({ canUndo: historyRef.current.length > 0, canRedo: true })
     reportActivity('Undo', 'Restored the previous board state', 'human')
@@ -424,6 +431,7 @@ function Workspace() {
     if (!next) return
     historyRef.current.push({ board: copySnapshot(snapshotNow()), discussion: structuredClone(sessionRef.current) })
     applySnapshot(next.board, true)
+    sessionRef.current = next.discussion
     setSession(next.discussion)
     setHistoryStatus({ canUndo: true, canRedo: futureRef.current.length > 0 })
     reportActivity('Redo', 'Reapplied the board change', 'human')
@@ -687,8 +695,19 @@ function Workspace() {
     if (discussion && initialBoard?.id === discussion.boardId) {
       const nextId = createUUID()
       const remapBoard = (board: BoardSnapshot): BoardSnapshot => ({ ...board, id: hosted.board.id, brainstormSessionId: nextId, nodes: board.nodes.map((node) => node.data.ideaMeta ? { ...node, data: { ...node.data, ideaMeta: { ...node.data.ideaMeta, sessionId: nextId } } } : node) })
+      const remapDiscussion = (snapshot: Omit<BrainstormSession, 'suggestions'>) => ({ ...structuredClone(snapshot), id: nextId, boardId: hosted.board.id })
       hosted.board = remapBoard(hosted.board)
-      hostedDiscussion = { ...structuredClone(discussion), id: nextId, boardId: hosted.board.id, suggestions: discussion.suggestions.map((suggestion) => ({ ...suggestion, boardBeforeAccept: suggestion.boardBeforeAccept ? remapBoard(suggestion.boardBeforeAccept) : undefined })), updatedAt: new Date().toISOString() }
+      hostedDiscussion = { ...structuredClone(discussion), id: nextId, boardId: hosted.board.id, suggestions: discussion.suggestions.map((suggestion) => {
+        const context = suggestion.context ? JSON.parse(suggestion.context) as { board: BoardSnapshot; session: BrainstormSession } : null
+        return { ...suggestion,
+          context: context ? suggestionContext(remapBoard(context.board), { ...remapDiscussion(context.session), suggestions: [] }) : undefined,
+          boardAtRequest: suggestion.boardAtRequest ? remapBoard(suggestion.boardAtRequest) : undefined,
+          boardBeforeAccept: suggestion.boardBeforeAccept ? remapBoard(suggestion.boardBeforeAccept) : undefined,
+          boardAfterAccept: suggestion.boardAfterAccept ? remapBoard(suggestion.boardAfterAccept) : undefined,
+          sessionBeforeAccept: suggestion.sessionBeforeAccept ? remapDiscussion(suggestion.sessionBeforeAccept) : undefined,
+          sessionAfterAccept: suggestion.sessionAfterAccept ? remapDiscussion(suggestion.sessionAfterAccept) : undefined,
+        }
+      }), updatedAt: new Date().toISOString() }
       const saved = await saveHostedMural(hosted.board, hosted.ownerToken)
       hosted.board = saved.board
       hosted.revision = saved.revision
@@ -1164,6 +1183,81 @@ function Workspace() {
     return registration.cleanup
   }, [actions, recordingActions])
 
+  const requestSuggestions = useCallback(async (reason: SuggestionReason, ids: string[]) => {
+    if (suggestionRequestRef.current) throw new Error('已有建议请求正在进行。')
+    const discussion = sessionRef.current
+    if (!discussion) throw new Error('当前白板没有讨论。')
+    if (visibleSuggestions(discussion).length) throw new Error('请先处理当前建议。')
+    const board = snapshotNow()
+    const version = contentVersionRef.current
+    const context = suggestionContext(board, discussion)
+    const assertCurrent = () => {
+      if (boardIdRef.current !== board.id || contentVersionRef.current !== version || !sessionRef.current || suggestionContext(snapshotNow(), sessionRef.current) !== context) throw new Error('讨论已变化，请重新请求建议。')
+    }
+    const purposes: Record<SuggestionReason, string> = { quiet_period: '讨论遇到停滞，请提出一个帮助成员继续思考的建议', similar_ideas: '分析选中观点是否重复或相似并提出分类建议', complementary_ideas: '分析选中观点的互补关系并提出有来源的整合方案' }
+    if ((reason === 'similar_ideas' && ids.length < 1) || (reason === 'complementary_ideas' && ids.length < 2)) throw new Error('请先选择需要分析的观点。')
+    suggestionRequestRef.current = true
+    try {
+      // 建议端点读取服务端已保存内容，主动请求前先保存当前真实讨论。
+      if (hostedAccessToken) { await saveHostedMural(board, hostedAccessToken); assertCurrent() }
+      await syncBrainstorm(discussion, board, hostedAccessToken)
+      assertCurrent()
+      const response = await requestBrainstormSuggestions(discussion.id, purposes[reason], ids, hostedAccessToken)
+      assertCurrent()
+      const next = receiveSuggestion(sessionRef.current!, snapshotNow(), response, reason, ids)
+      const shown = next !== sessionRef.current
+      if (shown) changeDiscussion(next)
+      return shown
+    } finally { suggestionRequestRef.current = false }
+  }, [changeDiscussion, hostedAccessToken, snapshotNow])
+
+  const acceptAgentSuggestion = useCallback((id: string) => {
+    const discussion = sessionRef.current
+    if (!discussion || suggestionRequestRef.current) throw new Error('当前不能确认建议。')
+    const board = snapshotNow()
+    const oldHistory = historyRef.current
+    const oldFuture = futureRef.current
+    recordHistory()
+    historyRef.current[historyRef.current.length - 1].aiSuggestionId = id
+    aiTransactionRef.current = true
+    try {
+      const next = acceptSuggestion(discussion, id, actions)
+      validateBrainstormPayload({ board: snapshotNow(), session: next })
+      sessionRef.current = next
+      setSession(next)
+    } catch (error) {
+      applySnapshot(board, true)
+      sessionRef.current = discussion
+      setSession(discussion)
+      historyRef.current = oldHistory
+      futureRef.current = oldFuture
+      setHistoryStatus({ canUndo: oldHistory.length > 0, canRedo: oldFuture.length > 0 })
+      throw error
+    } finally { aiTransactionRef.current = false }
+  }, [actions, applySnapshot, recordHistory, snapshotNow])
+
+  const undoAgentSuggestion = useCallback((id: string) => {
+    const discussion = sessionRef.current
+    if (!discussion || suggestionRequestRef.current) throw new Error('当前不能撤销建议。')
+    const restored = undoSuggestion(discussion, snapshotNow(), id)
+    validateBrainstormPayload(restored)
+    // 同时移除这一笔接受历史并更新后续快照，普通撤销不会重新带回 AI 内容。
+    const rebase = (entry: HistoryEntry): HistoryEntry => {
+      if (!entry.discussion?.suggestions.some((item) => item.id === id && item.status === 'accepted')) return entry
+      const next = undoSuggestion(entry.discussion, entry.board, id)
+      validateBrainstormPayload(next)
+      return { ...entry, board: next.board, discussion: next.session }
+    }
+    const history = historyRef.current.filter((entry) => entry.aiSuggestionId !== id).map(rebase)
+    const future = futureRef.current.map(rebase)
+    applySnapshot(restored.board, true)
+    sessionRef.current = restored.session
+    setSession(restored.session)
+    historyRef.current = history
+    futureRef.current = future
+    setHistoryStatus({ canUndo: history.length > 0, canRedo: future.length > 0 })
+  }, [applySnapshot, snapshotNow])
+
   const onNodesChange = useCallback((changes: NodeChange<BoardNode>[]) => {
     const next = applyNodeChanges(changes, nodesRef.current)
     commitNodes(next)
@@ -1625,7 +1719,7 @@ function Workspace() {
       </header>
 
       <section className={`workspace ${replayBoard ? 'is-replaying' : ''}`}>
-        {session && <BrainstormPanel key={session.id} session={session} nodes={nodes} actions={actions} onChange={changeDiscussion} />}
+        {session && <BrainstormPanel key={session.id} session={session} nodes={nodes} actions={actions} onChange={changeDiscussion} onRequest={requestSuggestions} onAccept={acceptAgentSuggestion} onUndo={undoAgentSuggestion} />}
         <ToolRail onAdd={addKind} onArtifact={addArtifact} onIdea={session ? addIdea : undefined} />
         <div className="canvas-wrap" data-focus-count={activeFocusClaims.length}>
           <ReactFlow<BoardNode, BoardEdge>

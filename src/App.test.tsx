@@ -123,12 +123,17 @@ describe('讨论入口', () => {
     expect(within(screen.getByRole('navigation', { name: '讨论阶段' })).getByText('新的主题')).toBeTruthy()
   })
 
-  it('AI 建议初始为空，手动求助明确失败，暂停可由人切换', () => {
+  it('AI 建议初始为空，手动求助明确失败，暂停可由人切换', async () => {
+    vi.stubGlobal('fetch', async (url: string, options?: RequestInit) => {
+      if (options?.method === 'PUT') { const payload = JSON.parse(options.body as string); return new Response(JSON.stringify({ ok: true, sessionId: payload.session.id, updatedAt: payload.board.updatedAt })) }
+      if (url.endsWith('/suggestions')) return new Response(JSON.stringify({ error: '未配置 DEEPSEEK_API_KEY，无法请求 AI 建议。' }), { status: 503 })
+      return new Response('{}')
+    })
     createDiscussion()
     const panel = screen.getByRole('complementary', { name: '讨论与 AI' })
     expect(within(panel).getByText('暂无 AI 建议')).toBeTruthy()
     fireEvent.click(within(panel).getByRole('button', { name: '需要帮助' }))
-    expect(within(panel).getByRole('status').textContent).toContain('AI 服务未连接')
+    await waitFor(() => expect(within(panel).getByRole('status').textContent).toContain('未配置 DEEPSEEK_API_KEY'))
     fireEvent.click(within(panel).getByRole('checkbox', { name: '暂停 AI' }))
     expect((within(panel).getByRole('checkbox', { name: '暂停 AI' }) as HTMLInputElement).checked).toBe(true)
     expect((within(panel).getByRole('button', { name: '需要帮助' }) as HTMLButtonElement).disabled).toBe(true)

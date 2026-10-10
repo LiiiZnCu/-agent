@@ -31,7 +31,8 @@ export function createBrainstormSession(input: { id: string; boardId: string; to
 
 export function setBrainstormStage(session: BrainstormSession, stage: BrainstormStage, updatedAt: string): BrainstormSession {
   if (!BRAINSTORM_STAGES.some((item) => item.id === stage)) throw new Error('未知讨论阶段')
-  return { ...session, stage, updatedAt }
+  const pausedStages = session.pausedStages ?? (session.aiPaused ? [session.stage] : [])
+  return { ...session, stage, updatedAt, pausedStages, aiPaused: pausedStages.includes(stage) }
 }
 
 export function createIdeaMeta(input: { sessionId: string; authorId: string; type: IdeaType; sourceIdeaIds?: string[]; createdAt: string }): IdeaMeta {

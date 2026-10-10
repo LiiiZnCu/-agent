@@ -26,3 +26,11 @@ it('保存回执必须对应同一个讨论和同一个写入版本', async () =
   vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ ok: true, sessionId: 'other-session', updatedAt: board.updatedAt })))
   await expect(api.syncBrainstorm(session, board)).rejects.toThrow()
 })
+it('建议请求带固定目的、真实 ID 与访问令牌，错误直接显示服务端原因', async () => {
+  vi.stubGlobal('fetch', async (url: string, options: RequestInit) => {
+    const data = JSON.parse(options.body as string)
+    if (url !== '/api/brainstorm/discussion-a/suggestions' || options.method !== 'POST' || data.purpose !== '分析选中观点' || data.ideaIds[0] !== 'real-id' || (options.headers as Record<string, string>).Authorization !== 'Bearer token') return new Response('{}', { status: 400 })
+    return new Response(JSON.stringify({ error: '未配置 DEEPSEEK_API_KEY，无法请求 AI 建议。' }), { status: 503 })
+  })
+  await expect(api.requestBrainstormSuggestions(session.id, '分析选中观点', ['real-id'], 'token')).rejects.toThrow('未配置 DEEPSEEK_API_KEY')
+})
