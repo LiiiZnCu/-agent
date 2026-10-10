@@ -39,7 +39,7 @@ import { Inspector } from './components/Inspector'
 import { LayerMenu } from './components/LayerMenu'
 import { ShareModal } from './components/ShareModal'
 import { ToolRail } from './components/ToolRail'
-import { INITIAL_SNAPSHOT } from './data'
+import { BRAINSTORM_STAGES, createBrainstormSession, setBrainstormStage } from './lib/brainstorm'
 import { createArtifactTemplate, validateArtifactSpec } from './lib/artifacts'
 import { arrangeGroupNodes, arrangeNodes, calculateClusterBounds, createBoardEdge, createBoardNode, createEmptyBoard, createId, createUUID, moveNodeLayer, serializeSnapshot } from './lib/board'
 import { importCanvasRelay, listBoards, loadBoard, loadBoardById, saveBoard } from './lib/storage'
@@ -55,6 +55,7 @@ import type {
   BoardNode,
   BoardSnapshot,
   BoardSummary,
+  BrainstormSession,
   ElementKind,
   LayerAction,
   MuralFocusClaim,
@@ -84,14 +85,19 @@ function comparableNode(node: BoardNode) {
 }
 
 function Workspace() {
+  const [fresh] = useState(() => !new URLSearchParams(window.location.search).has('mural') && listBoards().length === 0)
   const [initial] = useState<BoardSnapshot>(() => {
     const requestedId = new URLSearchParams(window.location.search).get('mural')
-    if (!requestedId) return loadBoard(INITIAL_SNAPSHOT)
+    if (!requestedId && fresh) return createEmptyBoard()
+    if (!requestedId) return loadBoard(createEmptyBoard())
     const local = loadBoardById(requestedId)
     if (local) return local
     const placeholder = createEmptyBoard('Opening shared mural')
     return { ...placeholder, id: requestedId }
   })
+  const [showCreation, setShowCreation] = useState(fresh)
+  const [session, setSession] = useState<BrainstormSession | null>(null)
+  const [discussionDraft, setDiscussionDraft] = useState({ topic: '', goal: '', background: '', constraints: '', memberName: '' })
   const [boardId, setBoardId] = useState(initial.id)
   const [boardCreatedAt, setBoardCreatedAt] = useState(initial.createdAt)
   const [name, setName] = useState(initial.name)
@@ -169,10 +175,11 @@ function Workspace() {
   }, [recording])
 
   useEffect(() => {
+    if (showCreation) return
     const url = new URL(window.location.href)
     url.searchParams.set('mural', boardId)
     window.history.replaceState({}, '', url)
-  }, [boardId])
+  }, [boardId, showCreation])
 
   const snapshotNow = useCallback((): BoardSnapshot => ({
     id: boardIdRef.current,
@@ -890,6 +897,7 @@ function Workspace() {
   }), [createCheckpoint, finalizeRecording, getRecording, joinParticipant, moderateParticipant, recordContribution, recordUserMessage, removeCheckpoint, setParticipantFocus, startRecording, updateCheckpoint, watchParticipant])
 
   useEffect(() => {
+    if (showCreation) return
     const timer = window.setTimeout(() => {
       try {
         saveBoard(snapshotNow())
@@ -900,7 +908,7 @@ function Workspace() {
       }
     }, 180)
     return () => window.clearTimeout(timer)
-  }, [boardId, edges, name, nodes, snapshotNow])
+  }, [boardId, edges, name, nodes, showCreation, snapshotNow])
 
   useEffect(() => {
     const requestedId = new URLSearchParams(window.location.search).get('mural')
@@ -1174,24 +1182,6 @@ function Workspace() {
     arrange('columns', 'agent')
     announce('Agent recipe arranged ideas by their cluster field')
   }, [addElements, arrange, createArtifact, announce])
-
-  const restoreDemo = useCallback(() => {
-    recordHistory()
-    applySnapshot({ ...structuredClone(INITIAL_SNAPSHOT), id: boardIdRef.current, createdAt: boardCreatedAtRef.current, updatedAt: new Date().toISOString() })
-    reportActivity('Demo restored', 'Loaded the hybrid rituals example', 'human')
-  }, [applySnapshot, recordHistory, reportActivity])
-
-  const resetDemo = useCallback(() => {
-    setConfirmation({
-      title: 'Restore the demo mural?',
-      description: 'This replaces the current canvas with the hybrid rituals example. You can undo the change afterward.',
-      confirmLabel: 'Restore demo',
-      onConfirm: () => {
-        restoreDemo()
-        setConfirmation(null)
-      },
-    })
-  }, [restoreDemo])
 
   const newBoard = useCallback(() => {
     clearHostedAccess()
@@ -1496,8 +1486,38 @@ function Workspace() {
     }
   }), [activeFocusClaims, nodes])
 
+  if (showCreation) return (
+    <main className="discussion-create" style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24 }}>
+      <form style={{ display: 'grid', gap: 16, width: 'min(100%, 480px)' }} onSubmit={(event) => {
+        event.preventDefault()
+        const board = createEmptyBoard(discussionDraft.topic.trim())
+        const next = createBrainstormSession({
+          id: createUUID(), boardId: board.id, ...discussionDraft,
+          memberId: createUUID(), createdAt: new Date().toISOString(),
+        })
+        applySnapshot(board)
+        saveBoard(board)
+        setBoardList(listBoards())
+        setSession(next)
+        setShowCreation(false)
+      }}>
+        <h1>创建讨论</h1>
+        <label>主题<input required value={discussionDraft.topic} onChange={(event) => setDiscussionDraft({ ...discussionDraft, topic: event.target.value })} /></label>
+        <label>目标<input required value={discussionDraft.goal} onChange={(event) => setDiscussionDraft({ ...discussionDraft, goal: event.target.value })} /></label>
+        <label>背景<textarea value={discussionDraft.background} onChange={(event) => setDiscussionDraft({ ...discussionDraft, background: event.target.value })} /></label>
+        <label>限制条件<textarea value={discussionDraft.constraints} onChange={(event) => setDiscussionDraft({ ...discussionDraft, constraints: event.target.value })} /></label>
+        <label>成员昵称<input required value={discussionDraft.memberName} onChange={(event) => setDiscussionDraft({ ...discussionDraft, memberName: event.target.value })} /></label>
+        <button type="submit" className="primary-button">开始讨论</button>
+      </form>
+    </main>
+  )
+
   return (
     <main className="app-shell">
+      {session && <nav className="discussion-stage-nav" aria-label="讨论阶段" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', padding: '12px 20px' }}>
+        <strong>{session.topic}</strong><span>{session.members.find((member) => member.id === session.currentMemberId)?.name}</span>
+        {BRAINSTORM_STAGES.map((stage) => <button key={stage.id} type="button" aria-current={session.stage === stage.id ? 'step' : undefined} onClick={() => setSession(setBrainstormStage(session, stage.id, new Date().toISOString()))}>{stage.label}</button>)}
+      </nav>}
       <header className="top-bar">
         <div className="brand-lockup">
           <div className="brand-mark header-mark" role="img" aria-label="Mural logo"><span /><span /><span /></div>
@@ -1538,7 +1558,6 @@ function Workspace() {
               <button type="button" onClick={(event) => { arrange('stacked'); event.currentTarget.closest('details')?.removeAttribute('open') }}>Stacked</button>
               <span />
               <button type="button" onClick={(event) => { newBoard(); event.currentTarget.closest('details')?.removeAttribute('open') }}>New blank board</button>
-              <button type="button" onClick={(event) => { resetDemo(); event.currentTarget.closest('details')?.removeAttribute('open') }}>Restore demo</button>
             </div>
           </details>
           <button type="button" className="icon-button theme-button" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')} aria-label={`Use ${theme === 'light' ? 'dark' : 'light'} theme`}>

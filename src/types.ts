@@ -40,6 +40,7 @@ export type BoardNodeData = {
   votes: number
   cluster?: string
   artifact?: ArtifactSpec
+  ideaMeta?: IdeaMeta
   justCreated?: boolean
   [key: string]: unknown
 }
@@ -59,6 +60,17 @@ export type BoardSnapshot = {
     edgeTombstones: Record<string, string>
   }
 }
+
+export type BrainstormStage = 'collecting' | 'organizing' | 'expanding' | 'integrating' | 'optimizing' | 'deciding' | 'output'
+export type IdeaType = 'idea' | 'question' | 'risk' | 'supplement' | 'proposal'
+export type BrainstormMember = { id: string; name: string; role: 'facilitator' | 'member'; joinedAt: string }
+export type IdeaMeta = { sessionId: string; authorId: string; type: IdeaType; createdAt: string; sourceIdeaIds: string[]; versions: Array<{ authorId: string; createdAt: string }> }
+export type AgentActionType = 'create_cluster' | 'connect_ideas' | 'ask_question' | 'suggest_merge' | 'create_matrix' | 'create_summary'
+export type AgentSuggestion = { id: string; trigger: 'manual' | 'stage' | 'board_change'; message: string; actions: Array<{ type: AgentActionType; [key: string]: unknown }>; status: 'pending' | 'accepted' | 'rejected' | 'ignored'; ignoredActionTypes: AgentActionType[]; pausedForStage: boolean; boardBeforeAccept?: BoardSnapshot; createdAt: string }
+export type Proposal = { id: string; title: string; description: string; sourceIdeaIds: string[]; authorId: string; integrationLogic: string; risks: string[]; openQuestions: string[]; status: 'draft' | 'accepted' | 'rejected'; comments: Array<{ id: string; authorId: string; kind: 'support' | 'oppose' | 'supplement' | 'risk' | 'verify'; content: string; createdAt: string }> }
+export type DecisionMatrix = { criteria: Array<{ id: string; name: string; weight: number }>; scores: Array<{ proposalId: string; criterionId: string; memberId: string; score: number; reason: string }>; votes: Array<{ proposalId: string; memberId: string }>; finalProposalId?: string; confirmedBy?: string; confirmedAt?: string }
+export type Outcome = { draft: string; finalProposalId?: string; actions: Array<{ title: string; ownerId?: string; dueAt?: string }>; updatedAt: string }
+export type BrainstormSession = { id: string; boardId: string; topic: string; goal: string; background: string; constraints: string; stage: BrainstormStage; currentMemberId: string; members: BrainstormMember[]; suggestions: AgentSuggestion[]; proposals: Proposal[]; decision: DecisionMatrix | null; outcome: Outcome | null; createdAt: string; updatedAt: string }
 
 export type Activity = {
   id: string
