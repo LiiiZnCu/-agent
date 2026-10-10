@@ -1,10 +1,11 @@
 import type { BrainstormSession } from '../types'
+import { isOutcomeConfirmed } from '../lib/brainstorm'
 
 export function OutcomeEditor({ session, onChange }: { session: BrainstormSession; onChange: (session: BrainstormSession) => void }) {
   const decision = session.decision ?? { criteria: [], scores: [], votes: [] }
   const outcome = session.outcome ?? { draft: '', actions: [], updatedAt: session.updatedAt }
   const selected = session.proposals.find((proposal) => proposal.id === decision.finalProposalId && proposal.status === 'accepted')
-  const confirmed = Boolean(selected && outcome.draft.trim() && decision.confirmedAt && decision.confirmedBy && outcome.finalProposalId === selected.id)
+  const confirmed = isOutcomeConfirmed(session)
   return <section aria-label="讨论成果"><h3>成果草稿</h3>
     <label>成果草稿<textarea rows={8} value={outcome.draft} onChange={(event) => onChange({ ...session, outcome: { ...outcome, draft: event.target.value, updatedAt: new Date().toISOString() }, decision: { ...decision, confirmedAt: undefined, confirmedBy: undefined } })} /></label>
     <label>最终方案<select value={decision.finalProposalId ?? ''} onChange={(event) => onChange({ ...session, decision: { ...decision, finalProposalId: event.target.value || undefined, confirmedAt: undefined, confirmedBy: undefined } })}><option value="">请选择已接受的方案</option>{session.proposals.filter((proposal) => proposal.status === 'accepted').map((proposal) => <option key={proposal.id} value={proposal.id}>{proposal.title}</option>)}</select></label>

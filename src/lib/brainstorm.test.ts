@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { INITIAL_SNAPSHOT } from '../data'
-import { createBrainstormSession, createIdeaMeta, setBrainstormStage, setSuggestionStatus, updateIdeaMeta } from './brainstorm'
+import { createBrainstormSession, createIdeaMeta, removeDiscussionReferences, setBrainstormStage, setSuggestionStatus, updateIdeaMeta } from './brainstorm'
+import { createBoardNode } from './board'
 
 describe('空白讨论', () => {
   it('首次白板没有演示内容', () => {
@@ -31,6 +32,22 @@ describe('空白讨论', () => {
     const revised = updateIdeaMeta(idea, 'm2', '2026-10-10T01:00:00.000Z')
     expect(revised).toMatchObject({ sessionId: 's1', authorId: 'm1', type: 'risk', sourceIdeaIds: ['i0'], versions: [{ authorId: 'm2', createdAt: '2026-10-10T01:00:00.000Z' }] })
     expect(idea.versions).toEqual([])
+  })
+
+  it('删除观点同时清理方案和全部卡片来源，删除最终方案清空成果选择', () => {
+    const session = createBrainstormSession({ id: 's1', boardId: 'b1', topic: '主题', goal: '目标', memberId: 'm1', memberName: '小林', createdAt: '2026-10-10T00:00:00.000Z' })
+    const source = { ...createBoardNode({ title: '原观点' }), id: 'source' }
+    const card = { ...createBoardNode({ title: '方案' }), id: 'proposal', data: { ...createBoardNode({ title: '方案' }).data, ideaMeta: createIdeaMeta({ sessionId: 's1', authorId: 'm1', type: 'proposal', sourceIdeaIds: ['source', 'other'], createdAt: session.createdAt }) } }
+    const proposal = { id: 'proposal', title: '方案', description: '', sourceIdeaIds: ['source', 'other'], authorId: 'm1', integrationLogic: '', risks: [], openQuestions: [], status: 'accepted' as const, comments: [] }
+    const discussion = { ...session, proposals: [proposal], decision: { criteria: [], scores: [], votes: [], finalProposalId: 'proposal', confirmedBy: 'm1', confirmedAt: session.createdAt }, outcome: { draft: '草稿', finalProposalId: 'proposal', actions: [], updatedAt: session.createdAt } }
+    const removedSource = removeDiscussionReferences(discussion, [source, card], new Set(['source']))
+    expect(removedSource.session!.proposals[0].sourceIdeaIds).toEqual(['other'])
+    expect(removedSource.nodes[0].data.ideaMeta!.sourceIdeaIds).toEqual(['other'])
+    expect(discussion.proposals[0].sourceIdeaIds).toEqual(['source', 'other'])
+    const removedProposal = removeDiscussionReferences(discussion, [source, card], new Set(['proposal']))
+    expect(removedProposal.session!.proposals).toEqual([])
+    expect(removedProposal.session!.outcome!.finalProposalId).toBeUndefined()
+    expect(removedProposal.session!.decision!.finalProposalId).toBeUndefined()
   })
 
   it('建议可忽略、暂停或接受，并保留撤销快照', () => {

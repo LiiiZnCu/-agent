@@ -1,6 +1,11 @@
-import type { AgentActionType, AgentSuggestion, BrainstormSession, BrainstormStage, IdeaMeta, IdeaType } from '../types'
+import type { AgentActionType, AgentSuggestion, BoardNode, BrainstormSession, BrainstormStage, IdeaMeta, IdeaType } from '../types'
 
 export const IDEA_LABELS: Record<IdeaType, string> = { idea: '观点', question: '问题', risk: '风险', evidence: '补充信息', supplement: '补充信息', proposal: '候选方案' }
+
+export function isOutcomeConfirmed(session: BrainstormSession): boolean {
+  const selected = session.proposals.find((proposal) => proposal.id === session.decision?.finalProposalId && proposal.status === 'accepted')
+  return Boolean(selected && session.outcome?.draft.trim() && session.decision?.confirmedAt && session.decision.confirmedBy && session.outcome.finalProposalId === selected.id)
+}
 
 export const BRAINSTORM_STAGES: Array<{ id: BrainstormStage; label: string }> = [
   { id: 'collecting', label: '想法收集' }, { id: 'organizing', label: '智能归类' },
@@ -35,6 +40,26 @@ export function createIdeaMeta(input: { sessionId: string; authorId: string; typ
 
 export function updateIdeaMeta(meta: IdeaMeta, authorId: string, createdAt: string): IdeaMeta {
   return { ...meta, versions: [...meta.versions, { authorId, createdAt }] }
+}
+
+export function removeDiscussionReferences(session: BrainstormSession | null, nodes: BoardNode[], deletedIds: Set<string>) {
+  const remainingNodes = nodes.filter((node) => !deletedIds.has(node.id)).map((node) => {
+    const meta = node.data.ideaMeta
+    if (!meta || !meta.sourceIdeaIds.some((id) => deletedIds.has(id))) return node
+    const nextMeta = { ...meta, sourceIdeaIds: meta.sourceIdeaIds.filter((id) => !deletedIds.has(id)) }
+    return { ...node, data: { ...node.data, ideaMeta: updateIdeaMeta(nextMeta, session?.currentMemberId ?? meta.authorId, new Date().toISOString()) } }
+  })
+  const nextSession = session ? {
+    ...session,
+    proposals: session.proposals.filter((proposal) => !deletedIds.has(proposal.id)).map((proposal) => ({ ...proposal, sourceIdeaIds: proposal.sourceIdeaIds.filter((id) => !deletedIds.has(id)) })),
+    decision: session.decision ? {
+      ...session.decision, scores: session.decision.scores.filter((score) => !deletedIds.has(score.proposalId)), votes: session.decision.votes.filter((vote) => !deletedIds.has(vote.proposalId)),
+      finalProposalId: session.decision.finalProposalId && deletedIds.has(session.decision.finalProposalId) ? undefined : session.decision.finalProposalId,
+      confirmedAt: undefined, confirmedBy: undefined,
+    } : null,
+    outcome: session.outcome ? { ...session.outcome, finalProposalId: session.outcome.finalProposalId && deletedIds.has(session.outcome.finalProposalId) ? undefined : session.outcome.finalProposalId } : null,
+  } : null
+  return { session: nextSession, nodes: remainingNodes }
 }
 
 export function setSuggestionStatus(session: BrainstormSession, suggestionId: string, status: AgentSuggestion['status'], options: { ignoredActionTypes?: AgentActionType[]; pausedForStage?: boolean; boardBeforeAccept?: AgentSuggestion['boardBeforeAccept'] } = {}): BrainstormSession {

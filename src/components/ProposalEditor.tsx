@@ -4,16 +4,11 @@ import type { BoardActions, BoardNode, BrainstormSession, Proposal } from '../ty
 
 const COMMENT_LABELS: Record<Proposal['comments'][number]['kind'], string> = { support: '支持', oppose: '反对', supplement: '补充', risk: '风险', verify: '待验证' }
 
-function ProposalCard({ proposal, session, nodes, onChange, actions }: { proposal: Proposal; session: BrainstormSession; nodes: BoardNode[]; onChange: (session: BrainstormSession) => void; actions: BoardActions }) {
+function ProposalCard({ proposal, session, nodes, onChange }: { proposal: Proposal; session: BrainstormSession; nodes: BoardNode[]; onChange: (session: BrainstormSession) => void }) {
   const [comment, setComment] = useState('')
   const [kind, setKind] = useState<Proposal['comments'][number]['kind']>('support')
   const update = (patch: Partial<Proposal>) => {
     const next = { ...proposal, ...patch }
-    const node = nodes.find((item) => item.id === proposal.id)
-    if (node) actions.updateElement(node.id, {
-      title: next.title, body: next.description,
-      ...(node.data.ideaMeta ? { ideaMeta: { ...node.data.ideaMeta, sourceIdeaIds: next.sourceIdeaIds } } : {}),
-    }, 'human')
     onChange({ ...session, proposals: session.proposals.map((item) => item.id === proposal.id ? next : item) })
   }
   return <section className="proposal-card" aria-label={`方案：${proposal.title}`}>
@@ -51,11 +46,9 @@ export function ProposalEditor({ session, nodes, onChange, actions }: { session:
     <form onSubmit={(event) => {
       event.preventDefault()
       if (!title.trim()) return
-      const node = actions.addElement({ title: title.trim(), body: description.trim(), kind: 'idea', ideaType: 'proposal' }, 'human')
-      const proposal: Proposal = { id: node.id, title: title.trim(), description: description.trim(), sourceIdeaIds: [], authorId: session.currentMemberId, integrationLogic: '', risks: [], openQuestions: [], status: 'draft', comments: [] }
-      onChange({ ...session, proposals: [...session.proposals, proposal] })
+      actions.addElement({ title: title.trim(), body: description.trim(), kind: 'idea', ideaType: 'proposal' }, 'human')
       setTitle(''); setDescription('')
     }}><label>新方案标题<input required value={title} onChange={(event) => setTitle(event.target.value)} /></label><label>新方案说明<textarea value={description} onChange={(event) => setDescription(event.target.value)} /></label><button disabled={!title.trim()}>添加候选方案</button></form>
-    {session.proposals.map((proposal) => <ProposalCard key={proposal.id} proposal={proposal} session={session} nodes={nodes} onChange={onChange} actions={actions} />)}
+    {session.proposals.map((proposal) => <ProposalCard key={proposal.id} proposal={proposal} session={session} nodes={nodes} onChange={onChange} />)}
   </section>
 }

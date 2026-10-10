@@ -39,7 +39,7 @@ import { Inspector } from './components/Inspector'
 import { LayerMenu } from './components/LayerMenu'
 import { ShareModal } from './components/ShareModal'
 import { ToolRail } from './components/ToolRail'
-import { createBrainstormSession, createIdeaMeta, updateIdeaMeta } from './lib/brainstorm'
+import { createBrainstormSession, createIdeaMeta, isOutcomeConfirmed, removeDiscussionReferences, updateIdeaMeta } from './lib/brainstorm'
 import { StageNavigator } from './components/StageNavigator'
 import { BrainstormPanel } from './components/BrainstormPanel'
 import { createArtifactTemplate, validateArtifactSpec } from './lib/artifacts'
@@ -453,6 +453,21 @@ function Workspace() {
     setSaveState('saving')
   }, [instanceId])
 
+  const changeDiscussion = useCallback((next: BrainstormSession) => {
+    const current = sessionRef.current
+    if (!current || JSON.stringify(current) === JSON.stringify(next)) return
+    recordHistory()
+    const nextNodes = nodesRef.current.map((node) => {
+      const proposal = next.proposals.find((item) => item.id === node.id)
+      const previous = current.proposals.find((item) => item.id === node.id)
+      if (!proposal || !previous || JSON.stringify([proposal.title, proposal.description, proposal.integrationLogic, proposal.risks, proposal.openQuestions, proposal.sourceIdeaIds]) === JSON.stringify([previous.title, previous.description, previous.integrationLogic, previous.risks, previous.openQuestions, previous.sourceIdeaIds])) return node
+      return { ...node, data: { ...node.data, title: proposal.title, body: proposal.description, ideaMeta: node.data.ideaMeta ? updateIdeaMeta({ ...node.data.ideaMeta, sourceIdeaIds: proposal.sourceIdeaIds }, next.currentMemberId, new Date().toISOString()) : undefined } }
+    })
+    if (nextNodes.some((node, index) => node !== nodesRef.current[index])) commitNodes(nextNodes)
+    sessionRef.current = next
+    setSession(next)
+  }, [commitNodes, recordHistory])
+
   const getCenterPosition = useCallback((offset = 0) => {
     const flow = flowRef.current
     if (!flow) return { x: 180 + offset, y: 140 + offset }
@@ -469,11 +484,16 @@ function Workspace() {
     const node = createBoardNode(input, fallback)
     if (discussion && node.data.kind !== 'frame') {
       node.data.ideaMeta = createIdeaMeta({ sessionId: discussion.id, authorId: discussion.currentMemberId, type: input.ideaType ?? (node.data.kind === 'question' ? 'question' : node.data.kind === 'insight' ? 'evidence' : 'idea'), createdAt: new Date().toISOString() })
-      if (!input.title.trim()) node.data.title = ''
     }
+    if (!input.title.trim()) node.data.title = ''
     node.selected = true
     const next = [...nodesRef.current.map((existing) => ({ ...existing, selected: false })), node]
     commitNodes(next)
+    if (discussion && input.ideaType === 'proposal') {
+      const nextDiscussion: BrainstormSession = { ...discussion, proposals: [...discussion.proposals, { id: node.id, title: node.data.title, description: node.data.body, sourceIdeaIds: [], authorId: discussion.currentMemberId, integrationLogic: '', risks: [], openQuestions: [], status: 'draft', comments: [] }], decision: discussion.decision ? { ...discussion.decision, confirmedAt: undefined, confirmedBy: undefined } : null, updatedAt: new Date().toISOString() }
+      sessionRef.current = nextDiscussion
+      setSession(nextDiscussion)
+    }
     setSelectedId(node.id)
     reportActivity('Element added', node.data.title, source, [node.id])
     return node
@@ -519,12 +539,11 @@ function Workspace() {
     const validIds = new Set(nodesRef.current.filter((node) => ids.includes(node.id)).map((node) => node.id))
     if (!validIds.size) return 0
     recordHistory()
-    commitNodes(nodesRef.current.filter((node) => !validIds.has(node.id)))
+    const remaining = removeDiscussionReferences(sessionRef.current, nodesRef.current, validIds)
+    commitNodes(remaining.nodes)
     commitEdges(edgesRef.current.filter((edge) => !validIds.has(edge.source) && !validIds.has(edge.target)))
-    setSession((current) => current ? {
-      ...current, proposals: current.proposals.filter((proposal) => !validIds.has(proposal.id)),
-      decision: current.decision ? { ...current.decision, scores: current.decision.scores.filter((score) => !validIds.has(score.proposalId)), votes: current.decision.votes.filter((vote) => !validIds.has(vote.proposalId)), finalProposalId: current.decision.finalProposalId && validIds.has(current.decision.finalProposalId) ? undefined : current.decision.finalProposalId, confirmedAt: undefined, confirmedBy: undefined } : null,
-    } : null)
+    sessionRef.current = remaining.session
+    setSession(remaining.session)
     setSelectedId((current) => current && validIds.has(current) ? null : current)
     reportActivity('Elements removed', `${validIds.size} deleted`, source)
     return validIds.size
@@ -1090,8 +1109,7 @@ function Workspace() {
   }, [addElement, session])
 
   const addIdea = useCallback((type: IdeaType) => {
-    const node = addElement({ title: '', kind: type === 'question' ? 'question' : type === 'evidence' ? 'insight' : 'idea', ideaType: type })
-    if (type === 'proposal') setSession((current) => current ? { ...current, proposals: [...current.proposals, { id: node.id, title: '', description: '', sourceIdeaIds: [], authorId: current.currentMemberId, integrationLogic: '', risks: [], openQuestions: [], status: 'draft', comments: [] }] } : null)
+    addElement({ title: '', kind: type === 'question' ? 'question' : type === 'evidence' ? 'insight' : 'idea', ideaType: type })
   }, [addElement])
 
   const addArtifact = useCallback((template: 'decision' | 'cards' | 'checklist') => {
@@ -1099,8 +1117,12 @@ function Workspace() {
   }, [createArtifact])
 
   const updateFromInspector = useCallback((id: string, patch: Partial<BoardNode['data']>) => {
+    const existing = nodesRef.current.find((node) => node.id === id)
+    if (!existing || !Object.entries(patch).some(([key, value]) => JSON.stringify(value) !== JSON.stringify(existing.data[key]))) return
     recordHistory()
-    const next = nodesRef.current.map((node) => node.id === id ? { ...node, data: { ...node.data, ...patch } } : node)
+    const contentChanged = (patch.title !== undefined && patch.title !== existing.data.title) || (patch.body !== undefined && patch.body !== existing.data.body)
+    const ideaMeta = contentChanged && existing.data.ideaMeta && sessionRef.current ? updateIdeaMeta(existing.data.ideaMeta, sessionRef.current.currentMemberId, new Date().toISOString()) : existing.data.ideaMeta
+    const next = nodesRef.current.map((node) => node.id === id ? { ...node, data: { ...node.data, ...patch, ideaMeta } } : node)
     commitNodes(next)
     const node = next.find((item) => item.id === id)
     if (node) reviseDiscussionNode(node)
@@ -1109,11 +1131,8 @@ function Workspace() {
   const commitInspectorChange = useCallback((id: string, field: string) => {
     const node = nodesRef.current.find((candidate) => candidate.id === id)
     if (!node) return
-    if (node.data.ideaMeta && session) {
-      commitNodes(nodesRef.current.map((item) => item.id === id ? { ...item, data: { ...item.data, ideaMeta: updateIdeaMeta(node.data.ideaMeta!, session.currentMemberId, new Date().toISOString()) } } : item))
-    }
     reportActivity('Element updated', `${node.data.title}: ${field}`, 'human', [id])
-  }, [commitNodes, reportActivity, session])
+  }, [reportActivity])
 
   const duplicateElement = useCallback((id: string) => {
     const existing = nodesRef.current.find((node) => node.id === id)
@@ -1128,6 +1147,12 @@ function Workspace() {
     }
     if (session && existing.data.ideaMeta) duplicate.data.ideaMeta = createIdeaMeta({ sessionId: session.id, authorId: session.currentMemberId, type: existing.data.ideaMeta.type, sourceIdeaIds: [id], createdAt: new Date().toISOString() })
     commitNodes([...nodesRef.current.map((node): BoardNode => ({ ...node, selected: false })), duplicate])
+    const proposal = sessionRef.current?.proposals.find((item) => item.id === id)
+    if (proposal && sessionRef.current) {
+      const nextDiscussion: BrainstormSession = { ...sessionRef.current, proposals: [...sessionRef.current.proposals, { ...structuredClone(proposal), id: duplicate.id, title: duplicate.data.title, authorId: sessionRef.current.currentMemberId, sourceIdeaIds: [...(duplicate.data.ideaMeta?.sourceIdeaIds ?? [])], status: 'draft', comments: [] }], decision: sessionRef.current.decision ? { ...sessionRef.current.decision, confirmedAt: undefined, confirmedBy: undefined } : null, updatedAt: new Date().toISOString() }
+      sessionRef.current = nextDiscussion
+      setSession(nextDiscussion)
+    }
     setSelectedId(duplicate.id)
     reportActivity('Element duplicated', duplicate.data.title, 'human', [duplicate.id])
   }, [commitNodes, recordHistory, reportActivity, session])
@@ -1291,6 +1316,10 @@ function Workspace() {
   }, [announce, finalizeRecording])
 
   const exportRecording = useCallback((format: 'json' | 'markdown' | 'csv') => {
+    if (sessionRef.current && !isOutcomeConfirmed(sessionRef.current)) {
+      announce('请先确认讨论成果，再导出讨论记录。')
+      return
+    }
     const current = recordingRef.current
     if (!current) return
     const board = snapshotNow()
@@ -1443,7 +1472,7 @@ function Workspace() {
 
   return (
     <main className="app-shell">
-      {session && <StageNavigator key={session.id} session={session} onChange={setSession} />}
+      {session && <StageNavigator key={session.id} session={session} onChange={changeDiscussion} />}
       <header className="top-bar">
         <div className="brand-lockup">
           <div className="brand-mark header-mark" role="img" aria-label="Mural logo"><span /><span /><span /></div>
@@ -1510,7 +1539,7 @@ function Workspace() {
       </header>
 
       <section className={`workspace ${replayBoard ? 'is-replaying' : ''}`}>
-        {session && <BrainstormPanel key={session.id} session={session} nodes={nodes} actions={actions} onChange={setSession} />}
+        {session && <BrainstormPanel key={session.id} session={session} nodes={nodes} actions={actions} onChange={changeDiscussion} />}
         <ToolRail onAdd={addKind} onArtifact={addArtifact} onIdea={session ? addIdea : undefined} />
         <div className="canvas-wrap" data-focus-count={activeFocusClaims.length}>
           <ReactFlow<BoardNode, BoardEdge>
@@ -1537,14 +1566,15 @@ function Workspace() {
             }}
             onNodeDragStart={recordHistory}
             onNodeDragStop={(_event, node) => reportActivity('Element moved', node.data.title, 'human', [node.id])}
-            onDoubleClick={(event) => {
+            onDoubleClickCapture={(event) => {
               if (replayBoard) return
               if ((event.target as Element).classList.contains('react-flow__pane')) {
                 const position = flowRef.current?.screenToFlowPosition({ x: event.clientX, y: event.clientY })
-                addElement({ title: 'New idea', kind: 'idea', x: position?.x, y: position?.y })
+                addElement({ title: '', kind: 'idea', x: position?.x, y: position?.y })
               }
             }}
             deleteKeyCode={null}
+            zoomOnDoubleClick={false}
             nodesDraggable={!replayBoard}
             nodesConnectable={!replayBoard}
             selectionOnDrag
@@ -1640,6 +1670,7 @@ function Workspace() {
           onStartRecording={() => startRecording()}
           onFinalizeRecording={finishRecordingFromUI}
           onExportRecording={exportRecording}
+          exportBlockedReason={session && !isOutcomeConfirmed(session) ? '请先确认讨论成果，再导出讨论记录。' : undefined}
           onFocusElement={(id) => focusElements([id])}
           replayCheckpointId={replayCheckpointId}
           onAddCheckpoint={saveCurrentCheckpoint}

@@ -40,6 +40,7 @@ type Props = {
   onStartRecording: () => void
   onFinalizeRecording: () => void
   onExportRecording: (format: 'json' | 'markdown' | 'csv') => void
+  exportBlockedReason?: string
   onFocusElement: (id: string) => void
   replayCheckpointId: string | null
   onAddCheckpoint: () => void
@@ -95,7 +96,7 @@ function StreamEvent({ event, events, nodes, color, onFocusElement }: { event: R
 export function AgentPanel({
   isOpen, view, supported, toolCount, activities, nodes, recording, backendState,
   onViewChange, onClose, onStartRecording, onFinalizeRecording,
-  onExportRecording, onFocusElement,
+  onExportRecording, exportBlockedReason, onFocusElement,
   replayCheckpointId, onAddCheckpoint, onUpdateCheckpoint, onDeleteCheckpoint, onReplayCheckpoint,
 }: Props) {
   const [now, setNow] = useState(0)
@@ -267,7 +268,8 @@ export function AgentPanel({
                 </div>
               )}
               <div className="recorder-stats"><span><strong>{recording.events.length}</strong> events</span><span><strong>{recording.participants.filter((person) => person.role === 'agent').length}</strong> agents</span></div>
-              <div className="recorder-actions">{recording.status === 'recording' ? <button type="button" className="stop-button" onClick={onFinalizeRecording}><Stop size={14} weight="fill" />Finish session</button> : <><button type="button" className="secondary-button" onClick={() => onExportRecording('json')}><DownloadSimple size={15} />JSON</button><button type="button" className="secondary-button" onClick={() => onExportRecording('markdown')}><DownloadSimple size={15} />MD</button><button type="button" className="secondary-button" onClick={() => onExportRecording('csv')}><DownloadSimple size={15} />CSV</button></>}</div>
+              <div className="recorder-actions">{recording.status === 'recording' ? <button type="button" className="stop-button" onClick={onFinalizeRecording}><Stop size={14} weight="fill" />Finish session</button> : <><button type="button" className="secondary-button" disabled={Boolean(exportBlockedReason)} onClick={() => onExportRecording('json')}><DownloadSimple size={15} />JSON</button><button type="button" className="secondary-button" disabled={Boolean(exportBlockedReason)} onClick={() => onExportRecording('markdown')}><DownloadSimple size={15} />MD</button><button type="button" className="secondary-button" disabled={Boolean(exportBlockedReason)} onClick={() => onExportRecording('csv')}><DownloadSimple size={15} />CSV</button></>}</div>
+              {recording.status === 'complete' && exportBlockedReason && <p role="note">{exportBlockedReason}</p>}
               {recording.status === 'complete' && <button type="button" className="text-button new-trace-button" onClick={onStartRecording}>Start another trace</button>}
               <p className="privacy-note">Shared summaries only. Private model reasoning is never recorded.</p>
             </>

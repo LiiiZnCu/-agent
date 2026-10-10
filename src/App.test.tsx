@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import App from './App'
 import { createEmptyBoard } from './lib/board'
@@ -13,6 +13,8 @@ beforeEach(() => {
   window.history.replaceState({}, '', '/')
   window.matchMedia = vi.fn().mockReturnValue({ matches: false, addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn() })
 })
+
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('讨论入口', () => {
   function createDiscussion() {
@@ -166,6 +168,23 @@ describe('讨论入口', () => {
     expect(exportButton.disabled).toBe(true)
   })
 
+  it.each(['添加', '复制'])('%s候选方案作为同一笔历史修改取消确认，撤销后恢复确认', (operation) => {
+    createDiscussion()
+    addProposal()
+    fireEvent.click(screen.getByRole('button', { name: '接受方案' }))
+    fireEvent.click(screen.getByRole('button', { name: '成果输出' }))
+    fireEvent.change(screen.getByLabelText('成果草稿'), { target: { value: '确认内容' } })
+    const finalSelect = screen.getByLabelText('最终方案') as HTMLSelectElement
+    fireEvent.change(finalSelect, { target: { value: finalSelect.options[1].value } })
+    fireEvent.click(screen.getByRole('button', { name: '确认最终结果' }))
+    if (operation === '添加') addProposal()
+    else fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }))
+    expect((screen.getByRole('button', { name: '导出讨论成果' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect((screen.getByRole('button', { name: '导出讨论成果' }) as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.getAllByRole('region', { name: /方案：/ })).toHaveLength(1)
+  })
+
   it('工具栏方案与检查器保持同一份方案，修改原始观点会取消成果确认', () => {
     createDiscussion()
     fireEvent.click(screen.getByRole('button', { name: 'Add proposal' }))
@@ -245,6 +264,150 @@ describe('讨论入口', () => {
     expect(activeSignal.aborted).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: '下一阶段' }))
     expect(activeSignal.aborted).toBe(false)
+  })
+
+  it('画布与讨论交错修改时按同一历史顺序撤销和重做，新修改清空重做', () => {
+    createDiscussion()
+    fireEvent.click(screen.getByRole('button', { name: 'Add idea' }))
+    fireEvent.click(screen.getByRole('button', { name: '下一阶段' }))
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: '后来画布编辑' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('')
+    expect(screen.getByRole('button', { name: '智能归类' }).getAttribute('aria-current')).toBe('step')
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(screen.getByRole('button', { name: '想法收集' }).getAttribute('aria-current')).toBe('step')
+    fireEvent.click(screen.getByRole('button', { name: 'Redo' }))
+    expect(screen.getByRole('button', { name: '智能归类' }).getAttribute('aria-current')).toBe('step')
+    fireEvent.click(screen.getByRole('button', { name: '成果输出' }))
+    expect((screen.getByRole('button', { name: 'Redo' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(screen.getByRole('button', { name: '智能归类' }).getAttribute('aria-current')).toBe('step')
+  })
+
+  it('成员、评分理由、草稿和确认操作都能单独撤销', () => {
+    createDiscussion()
+    addProposal()
+    fireEvent.change(screen.getByLabelText('新成员昵称'), { target: { value: '小夏' } })
+    fireEvent.click(screen.getByRole('button', { name: '添加成员' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect((screen.getByLabelText('当前成员') as HTMLSelectElement).options).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: '接受方案' }))
+    fireEvent.click(screen.getByRole('button', { name: '辅助决策' }))
+    fireEvent.change(screen.getByLabelText('新标准名称'), { target: { value: '成本' } })
+    fireEvent.change(screen.getByLabelText('新标准权重'), { target: { value: '1' } })
+    fireEvent.click(screen.getByRole('button', { name: '添加决策标准' }))
+    fireEvent.change(screen.getByLabelText('评分'), { target: { value: '8' } })
+    fireEvent.change(screen.getByLabelText('评分理由'), { target: { value: '当前理由' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存评分' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(screen.queryByText('当前理由', { selector: 'p' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '成果输出' }))
+    fireEvent.change(screen.getByLabelText('成果草稿'), { target: { value: '新草稿' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect((screen.getByLabelText('成果草稿') as HTMLTextAreaElement).value).toBe('')
+    fireEvent.change(screen.getByLabelText('成果草稿'), { target: { value: '待确认草稿' } })
+    const finalSelect = screen.getByLabelText('最终方案') as HTMLSelectElement
+    fireEvent.change(finalSelect, { target: { value: finalSelect.options[1].value } })
+    fireEvent.click(screen.getByRole('button', { name: '确认最终结果' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect((screen.getByRole('button', { name: '导出讨论成果' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it.each([['JSON', 'json'], ['MD', 'md'], ['CSV', 'csv']])('Trace %s 导出必须等成果确认，普通白板导出仍可用', (format, extension) => {
+    const downloads: string[] = []
+    vi.stubGlobal('URL', class extends URL { static createObjectURL() { return 'blob:test' } static revokeObjectURL() {} })
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function(this: HTMLAnchorElement) { downloads.push(this.download) })
+    createDiscussion()
+    addProposal()
+    fireEvent.click(screen.getByRole('button', { name: '接受方案' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Trace' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Record session' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Finish session' }))
+    const traceButton = screen.getByRole('button', { name: format }) as HTMLButtonElement
+    expect(traceButton.disabled).toBe(true)
+    expect(screen.getByText('请先确认讨论成果，再导出讨论记录。')).toBeTruthy()
+    fireEvent.click(traceButton)
+    expect(downloads).toEqual([])
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }))
+    expect(downloads).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: '成果输出' }))
+    fireEvent.change(screen.getByLabelText('成果草稿'), { target: { value: '确认的成果' } })
+    const finalSelect = screen.getByLabelText('最终方案') as HTMLSelectElement
+    fireEvent.change(finalSelect, { target: { value: finalSelect.options[1].value } })
+    fireEvent.click(screen.getByRole('button', { name: '确认最终结果' }))
+    expect(traceButton.disabled).toBe(false)
+    fireEvent.click(traceButton)
+    expect(downloads).toHaveLength(2)
+    expect(downloads[1].endsWith(`.${extension}`)).toBe(true)
+  })
+
+  it('复制方案同步创建可评论、评分并选择为最终结果的方案副本', () => {
+    createDiscussion()
+    addProposal()
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }))
+    const copy = screen.getByRole('region', { name: '方案：成员填写的方案 copy' })
+    fireEvent.change(within(copy).getByLabelText('评论内容'), { target: { value: '副本的新评论' } })
+    fireEvent.click(within(copy).getByRole('button', { name: '添加方案评论' }))
+    expect(within(copy).getByText('副本的新评论')).toBeTruthy()
+    fireEvent.click(within(copy).getByRole('button', { name: '接受方案' }))
+    fireEvent.click(screen.getByRole('button', { name: '辅助决策' }))
+    fireEvent.change(screen.getByLabelText('新标准名称'), { target: { value: '可行性' } })
+    fireEvent.change(screen.getByLabelText('新标准权重'), { target: { value: '1' } })
+    fireEvent.click(screen.getByRole('button', { name: '添加决策标准' }))
+    fireEvent.change(screen.getAllByLabelText('评分')[1], { target: { value: '6' } })
+    fireEvent.change(screen.getAllByLabelText('评分理由')[1], { target: { value: '副本评分理由' } })
+    fireEvent.click(screen.getAllByRole('button', { name: '保存评分' })[1])
+    expect(screen.getByText('副本评分理由', { selector: 'p' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '成果输出' }))
+    const final = screen.getByLabelText('最终方案') as HTMLSelectElement
+    expect(final.options[1].textContent).toBe('成员填写的方案 copy')
+    fireEvent.change(final, { target: { value: final.options[1].value } })
+    fireEvent.change(screen.getByLabelText('成果草稿'), { target: { value: '采用副本的成果' } })
+    fireEvent.click(screen.getByRole('button', { name: '确认最终结果' }))
+    expect((screen.getByRole('button', { name: '导出讨论成果' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('双击画布创建空白观点', async () => {
+    createDiscussion()
+    fireEvent.doubleClick(document.querySelector('.react-flow__pane')!, { clientX: 500, clientY: 250 })
+    const id = window.localStorage.getItem('canvas-relay-current-board-v2')
+    await waitFor(() => {
+      const board = JSON.parse(window.localStorage.getItem(`canvas-relay-board-v2:${id}`) || 'null')
+      expect(board.nodes).toHaveLength(1)
+      expect(board.nodes[0].data.title).toBe('')
+      expect(board.nodes[0].data.body).toBe('')
+    })
+  })
+
+  it('方案组合逻辑、风险、待确认事项及来源每次实际变化均记录版本', () => {
+    createDiscussion()
+    fireEvent.click(screen.getByRole('button', { name: 'Add idea' }))
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: '来源观点' } })
+    addProposal()
+    const inspector = screen.getByRole('complementary', { name: 'Element inspector' })
+    expect(within(inspector).getByText('版本 1')).toBeTruthy()
+    for (const [index, label] of ['组合逻辑', '方案风险', '待确认事项'].entries()) {
+      fireEvent.change(screen.getByLabelText(label), { target: { value: `${label}内容` } })
+      expect(within(inspector).getByText(`版本 ${index + 2}`)).toBeTruthy()
+    }
+    fireEvent.click(screen.getByRole('checkbox', { name: '来源观点' }))
+    expect(within(inspector).getByText('版本 5')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('组合逻辑'), { target: { value: '组合逻辑内容' } })
+    expect(within(inspector).getByText('版本 5')).toBeTruthy()
+  })
+
+  it('仅聚焦和离开检查器字段不增加版本，实际输入只记录一次', () => {
+    createDiscussion()
+    fireEvent.click(screen.getByRole('button', { name: 'Add idea' }))
+    const inspector = screen.getByRole('complementary', { name: 'Element inspector' })
+    fireEvent.focus(screen.getByLabelText('Title'))
+    fireEvent.blur(screen.getByLabelText('Title'))
+    expect(within(inspector).getByText('版本 1')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: '真实修改' } })
+    fireEvent.blur(screen.getByLabelText('Title'))
+    expect(within(inspector).getByText('版本 2')).toBeTruthy()
+    fireEvent.blur(screen.getByLabelText('Title'))
+    expect(within(inspector).getByText('版本 2')).toBeTruthy()
   })
 
   it('真实创建的白板没有节点、连线或演示入口，记录功能仍可使用', () => {
