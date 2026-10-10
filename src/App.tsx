@@ -335,6 +335,7 @@ function Workspace() {
       edgeTombstonesRef.current = { ...edgeTombstonesRef.current, ...copy.sync.edgeTombstones }
     }
     if (copy.id !== boardIdRef.current) {
+      setSession(null)
       nodeTombstonesRef.current = { ...(copy.sync?.nodeTombstones ?? {}) }
       edgeTombstonesRef.current = { ...(copy.sync?.edgeTombstones ?? {}) }
     } else {
@@ -1145,44 +1146,6 @@ function Workspace() {
     announce('Artifact spec copied')
   }, [announce, getArtifactSpec])
 
-  const runDemoRecipe = useCallback((recipe: 'diverge' | 'cluster' | 'artifact') => {
-    if (recipe === 'artifact') {
-      const strongest = nodesRef.current.filter((node) => node.data.kind !== 'frame' && node.data.kind !== 'artifact').sort((a, b) => b.data.votes - a.data.votes).slice(0, 4)
-      const template = createArtifactTemplate('decision')
-      template.records = strongest.length ? strongest.map((node) => ({
-        option: node.data.title,
-        impact: node.data.votes >= 6 ? 'High' : 'Medium',
-        effort: node.data.kind === 'action' ? 'Low' : 'Medium',
-        owner: 'Unassigned',
-      })) : template.records
-      createArtifact(template, undefined, undefined, 'agent')
-      announce('Agent recipe created a structured matrix')
-      return
-    }
-
-    if (recipe === 'diverge') {
-      const created = addElements([
-        { title: 'Five-minute pairing', body: 'Match teammates for one focused question.', kind: 'idea', color: 'sun', cluster: 'Connection' },
-        { title: 'Async gratitude wall', body: 'Capture specific appreciation while work happens.', kind: 'idea', color: 'rose', cluster: 'Connection' },
-        { title: 'No-camera planning', body: 'Run low-pressure sessions around a shared board.', kind: 'idea', color: 'sky', cluster: 'Focus' },
-        { title: 'Weekly energy budget', body: 'Make workload tradeoffs visible before they become stress.', kind: 'insight', color: 'mint', cluster: 'Signals' },
-        { title: 'Meeting exit ticket', body: 'Ask one question before everyone leaves.', kind: 'question', color: 'rose', cluster: 'Signals' },
-        { title: 'Protect one quiet hour', body: 'Create a team-wide block with no messages.', kind: 'action', color: 'paper', cluster: 'Focus' },
-      ], 'agent')
-      window.setTimeout(() => flowRef.current?.fitView({ nodes: created, padding: 0.18, duration: 600 }), 50)
-      announce('Agent recipe added six ideas')
-      return
-    }
-
-    const eligible = nodesRef.current.filter((node) => node.data.kind !== 'frame' && node.data.kind !== 'artifact')
-    if (eligible.length < 2) {
-      announce('Add at least two ideas before grouping')
-      return
-    }
-    arrange('columns', 'agent')
-    announce('Agent recipe arranged ideas by their cluster field')
-  }, [addElements, arrange, createArtifact, announce])
-
   const newBoard = useCallback(() => {
     clearHostedAccess()
     saveBoard(snapshotNow())
@@ -1300,84 +1263,6 @@ function Workspace() {
     URL.revokeObjectURL(url)
     announce(`Decision trace exported as ${extension.toUpperCase()}`)
   }, [announce, snapshotNow])
-
-  const applyMultiAgentDemo = useCallback(() => {
-    let session = createRecordingSession('Remote onboarding decision trace', {
-      id: 'human-facilitator', name: 'You', role: 'human', specialty: 'Facilitator',
-    }, boardIdRef.current)
-    const participants = [
-      { id: 'agent-explorer', name: 'Explorer', role: 'agent' as const, specialty: 'Divergent ideation' },
-      { id: 'agent-critic', name: 'Critic', role: 'agent' as const, specialty: 'Risks and constraints' },
-      { id: 'agent-synth', name: 'Synthesizer', role: 'agent' as const, specialty: 'Decisions and next steps' },
-    ]
-    participants.forEach((participant) => { session = joinRecording(session, participant) })
-    session = { ...session, moderatorId: 'agent-synth' }
-    session = appendEvent(session, {
-      participantId: 'human-facilitator', participantName: 'You', participantRole: 'human', kind: 'question',
-      content: 'How might we make remote onboarding useful from the first day without adding more meetings?',
-    })
-    const questionId = session.events.at(-1)!.id
-    session = appendEvent(session, {
-      participantId: 'agent-explorer', participantName: 'Explorer', participantRole: 'agent', kind: 'proposal', replyTo: questionId,
-      content: 'Create a role-based canvas with permissions for day zero, an async buddy card, and a first deliverable by day three.',
-      relatedElementIds: ['idea-map', 'idea-room'],
-    })
-    const proposalId = session.events.at(-1)!.id
-    session = appendEvent(session, {
-      participantId: 'agent-critic', participantName: 'Critic', participantRole: 'agent', kind: 'critique', replyTo: proposalId,
-      content: 'A single checklist can hide timezone and role differences. Keep the primitives reusable and let each role generate its own artifact.',
-      relatedElementIds: ['artifact-decision'],
-    })
-    const critiqueId = session.events.at(-1)!.id
-    session = appendEvent(session, {
-      participantId: 'agent-explorer', participantName: 'Explorer', participantRole: 'agent', kind: 'evidence', replyTo: critiqueId,
-      content: 'Role-specific templates address that risk. The shared layer should stay small: owner, first outcome, buddy, access, and one visible question.',
-      relatedElementIds: ['idea-map'],
-    })
-    const evidenceId = session.events.at(-1)!.id
-    session = appendEvent(session, {
-      participantId: 'agent-critic', participantName: 'Critic', participantRole: 'agent', kind: 'question', replyTo: evidenceId,
-      content: 'What prevents the template from becoming another stale checklist, and how will a new hire signal that something is blocked?',
-      relatedElementIds: ['idea-room'],
-    })
-    const criticQuestionId = session.events.at(-1)!.id
-    session = appendEvent(session, {
-      participantId: 'human-facilitator', participantName: 'You', participantRole: 'human', kind: 'evidence', replyTo: criticQuestionId,
-      content: 'Keep it usable offline and make every blocked item visible to the buddy. The first useful outcome matters more than task completion.',
-    })
-    const humanConstraintId = session.events.at(-1)!.id
-    session = appendEvent(session, {
-      participantId: 'agent-synth', participantName: 'Synthesizer', participantRole: 'agent', kind: 'reasoning_summary', replyTo: humanConstraintId,
-      content: 'Shared direction: use a small role template, surface blockers as first-class cards, and evaluate success by contribution rather than checklist completion.',
-      relatedElementIds: ['artifact-decision', 'action-prototype'],
-    })
-    const synthesisId = session.events.at(-1)!.id
-    session = appendEvent(session, {
-      participantId: 'agent-synth', participantName: 'Synthesizer', participantRole: 'agent', kind: 'decision', replyTo: synthesisId,
-      content: 'Adopt role-based artifact templates and test them with five new hires. Measure time to first meaningful contribution.',
-      relatedElementIds: ['artifact-decision', 'action-prototype'],
-    })
-    recordingRef.current = session
-    setRecording(session)
-    openPanel('stream')
-    announce('Loaded a live trace with three agent participants')
-  }, [announce, openPanel])
-
-  const loadMultiAgentDemo = useCallback(() => {
-    if (recordingRef.current?.status === 'recording') {
-      setConfirmation({
-        title: 'Replace the active trace?',
-        description: 'This replaces the current live trace with the multi-agent demo. Export the current trace first if you need to keep it.',
-        confirmLabel: 'Load agent demo',
-        onConfirm: () => {
-          applyMultiAgentDemo()
-          setConfirmation(null)
-        },
-      })
-      return
-    }
-    applyMultiAgentDemo()
-  }, [applyMultiAgentDemo])
 
   const openShare = useCallback(() => {
     setShareCopied(false)
@@ -1709,11 +1594,9 @@ function Workspace() {
           backendState={backendState}
           onViewChange={setPanelView}
           onClose={() => setAgentOpen(false)}
-          onRunDemo={runDemoRecipe}
           onStartRecording={() => startRecording()}
           onFinalizeRecording={finishRecordingFromUI}
           onExportRecording={exportRecording}
-          onLoadMultiAgentDemo={loadMultiAgentDemo}
           onFocusElement={(id) => focusElements([id])}
           replayCheckpointId={replayCheckpointId}
           onAddCheckpoint={saveCurrentCheckpoint}

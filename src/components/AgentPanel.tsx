@@ -11,7 +11,6 @@ import {
   Record,
   Robot,
   ShieldCheck,
-  Sparkle,
   PencilSimple,
   Stop,
   Table,
@@ -38,11 +37,9 @@ type Props = {
   backendState: 'checking' | 'offline' | 'syncing' | 'synced'
   onViewChange: (view: AgentPanelView) => void
   onClose: () => void
-  onRunDemo: (recipe: 'diverge' | 'cluster' | 'artifact') => void
   onStartRecording: () => void
   onFinalizeRecording: () => void
   onExportRecording: (format: 'json' | 'markdown' | 'csv') => void
-  onLoadMultiAgentDemo: () => void
   onFocusElement: (id: string) => void
   replayCheckpointId: string | null
   onAddCheckpoint: () => void
@@ -50,12 +47,6 @@ type Props = {
   onDeleteCheckpoint: (eventId: string) => void
   onReplayCheckpoint: (eventId: string | null) => void
 }
-
-const RECIPES = [
-  { id: 'diverge' as const, label: 'Generate six ideas', detail: 'Create a diverse set around the current brief.' },
-  { id: 'cluster' as const, label: 'Group by theme', detail: 'Frame related ideas and arrange the canvas.' },
-  { id: 'artifact' as const, label: 'Build a decision table', detail: 'Compare the strongest ideas as structured data.' },
-]
 
 function formatElapsed(startedAt: string, now: number) {
   const seconds = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000))
@@ -103,8 +94,8 @@ function StreamEvent({ event, events, nodes, color, onFocusElement }: { event: R
 
 export function AgentPanel({
   isOpen, view, supported, toolCount, activities, nodes, recording, backendState,
-  onViewChange, onClose, onRunDemo, onStartRecording, onFinalizeRecording,
-  onExportRecording, onLoadMultiAgentDemo, onFocusElement,
+  onViewChange, onClose, onStartRecording, onFinalizeRecording,
+  onExportRecording, onFocusElement,
   replayCheckpointId, onAddCheckpoint, onUpdateCheckpoint, onDeleteCheckpoint, onReplayCheckpoint,
 }: Props) {
   const [now, setNow] = useState(0)
@@ -214,7 +205,7 @@ export function AgentPanel({
             {recording?.status === 'recording' && <span className="rec-badge"><Record size={10} weight="fill" />REC {formatElapsed(recording.startedAt, now)}</span>}
           </div>
           <div className={`storage-status state-${backendState}`}><span />{backendState === 'synced' ? 'Synced to local SQLite' : backendState === 'syncing' ? 'Syncing SQLite' : backendState === 'checking' ? 'Checking local backend' : 'Offline cache active'}</div>
-          {!recording ? <><p>Preserve shared messages, agent work, decisions, and the final mural.</p><div className="recorder-actions"><button type="button" className="record-button" onClick={onStartRecording}><Record size={15} weight="fill" />Record session</button><button type="button" className="text-button" onClick={onLoadMultiAgentDemo}>Load agent demo</button></div></> : (
+          {!recording ? <><p>Preserve shared messages, agent work, decisions, and the final mural.</p><div className="recorder-actions"><button type="button" className="record-button" onClick={onStartRecording}><Record size={15} weight="fill" />Record session</button></div></> : (
             <>
               <div className="session-access"><span>Mural UUID</span><code>{recording.boardId ?? 'Local session'}</code></div>
               <section className="checkpoint-timeline" aria-label="Replay checkpoints">
@@ -287,7 +278,6 @@ export function AgentPanel({
       {view === 'agent' && (
         <>
           <div className={`webmcp-status ${supported ? 'is-ready' : 'is-offline'}`}><div>{supported ? <Check size={16} weight="bold" /> : <BracketsCurly size={16} weight="bold" />}<strong>{supported ? `WebMCP ready, ${toolCount} tools` : 'WebMCP browser needed'}</strong></div><p>{supported ? 'Agents can read and change this mural directly.' : 'Use ChatGPT or Chromium 149+ with WebMCP enabled.'}</p></div>
-          <section className="agent-section"><div className="agent-section-title"><Sparkle size={16} weight="fill" /><h3>Quick agent actions</h3></div><p className="section-help">Run the same action layer exposed to connected agents.</p><div className="recipe-list">{RECIPES.map((recipe) => <button type="button" key={recipe.id} onClick={() => onRunDemo(recipe.id)}><span><strong>{recipe.label}</strong><small>{recipe.detail}</small></span><ArrowRight size={17} /></button>)}</div></section>
           <section className="agent-section tool-catalog-section"><div className="agent-section-title"><BracketsCurly size={16} /><h3>Tool surface</h3><span>{TOOL_CATALOG.length}</span></div><div className="tool-catalog">{TOOL_CATALOG.map((tool) => <div key={tool.name}><code>{tool.name.replace('canvas_', '')}</code><span className={`tool-mode mode-${tool.mode}`}>{tool.mode}</span></div>)}</div></section>
         </>
       )}
