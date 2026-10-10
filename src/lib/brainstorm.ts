@@ -1,5 +1,7 @@
 import type { AgentActionType, AgentSuggestion, BrainstormSession, BrainstormStage, IdeaMeta, IdeaType } from '../types'
 
+export const IDEA_LABELS: Record<IdeaType, string> = { idea: '观点', question: '问题', risk: '风险', evidence: '补充信息', supplement: '补充信息', proposal: '候选方案' }
+
 export const BRAINSTORM_STAGES: Array<{ id: BrainstormStage; label: string }> = [
   { id: 'collecting', label: '想法收集' }, { id: 'organizing', label: '智能归类' },
   { id: 'expanding', label: '引导扩散' }, { id: 'integrating', label: '整合方案' },

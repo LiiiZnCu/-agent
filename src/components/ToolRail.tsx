@@ -9,16 +9,19 @@ import {
   Plus,
   QuestionMark,
   Table,
+  Warning,
+  FileText,
 } from '@phosphor-icons/react'
 import type { MouseEvent } from 'react'
-import type { ElementKind } from '../types'
+import type { ElementKind, IdeaType } from '../types'
 
 type Props = {
   onAdd: (kind: ElementKind) => void
   onArtifact: (template: 'decision' | 'cards' | 'checklist') => void
+  onIdea?: (type: IdeaType) => void
 }
 
-export function ToolRail({ onAdd, onArtifact }: Props) {
+export function ToolRail({ onAdd, onArtifact, onIdea }: Props) {
   const chooseArtifact = (event: MouseEvent<HTMLButtonElement>, template: 'decision' | 'cards' | 'checklist') => {
     onArtifact(template)
     event.currentTarget.closest('details')?.removeAttribute('open')
@@ -30,6 +33,11 @@ export function ToolRail({ onAdd, onArtifact }: Props) {
         <CursorClick size={20} weight="bold" />
       </button>
       <span className="tool-divider" />
+      {onIdea && <>
+        <button className="tool-button" type="button" aria-label="Add risk" data-tooltip="风险" onClick={() => onIdea('risk')}><Warning size={20} weight="bold" /></button>
+        <button className="tool-button" type="button" aria-label="Add evidence" data-tooltip="补充信息" onClick={() => onIdea('evidence')}><FileText size={20} weight="bold" /></button>
+        <button className="tool-button" type="button" aria-label="Add proposal" data-tooltip="候选方案" onClick={() => onIdea('proposal')}><CardsThree size={20} weight="bold" /></button>
+      </>}
       <button className="tool-button" type="button" aria-label="Add idea" data-tooltip="Idea" onClick={() => onAdd('idea')}>
         <Lightbulb size={20} weight="bold" />
       </button>

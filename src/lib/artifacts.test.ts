@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { createArtifactTemplate, validateArtifactSpec } from './artifacts'
 
 describe('Artifact Spec 1.0', () => {
+  it.each(['decision', 'cards', 'checklist'] as const)('%s 模板保留结构但没有预设内容', (template) => {
+    const artifact = createArtifactTemplate(template)
+    expect(artifact.fields.length).toBeGreaterThan(0)
+    expect(artifact.records).toEqual([])
+  })
   it('creates reusable table, cards, and checklist templates', () => {
     expect(createArtifactTemplate('decision').presentation.layout).toBe('table')
     expect(createArtifactTemplate('cards').artifactType).toBe('cards')

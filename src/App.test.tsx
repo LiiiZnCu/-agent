@@ -7,6 +7,7 @@ import { saveBoard } from './lib/storage'
 
 beforeEach(() => {
   cleanup()
+  Object.defineProperty(document, 'modelContext', { configurable: true, value: undefined })
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   window.localStorage.clear()
   window.history.replaceState({}, '', '/')
@@ -35,6 +36,215 @@ describe('讨论入口', () => {
     expect(within(navigation).getByText('小林')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '成果输出' }))
     expect(screen.getByRole('button', { name: '成果输出' }).getAttribute('aria-current')).toBe('step')
+  })
+
+  it('阶段支持前进、返回、重启和编辑主题，并保留已有观点', () => {
+    createDiscussion()
+    fireEvent.click(screen.getByRole('button', { name: 'Add idea' }))
+    fireEvent.click(screen.getByRole('button', { name: '下一阶段' }))
+    expect(screen.getByRole('button', { name: '智能归类' }).getAttribute('aria-current')).toBe('step')
+    fireEvent.click(screen.getByRole('button', { name: '上一阶段' }))
+    fireEvent.click(screen.getByRole('button', { name: '重启当前阶段' }))
+    expect(screen.getByText('当前阶段已重启')).toBeTruthy()
+    expect(document.querySelector('.canvas-status')?.textContent).toContain('1 elements')
+    fireEvent.click(screen.getByRole('button', { name: '编辑讨论主题' }))
+    fireEvent.change(screen.getByLabelText('讨论主题'), { target: { value: '新的主题' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存主题' }))
+    expect(within(screen.getByRole('navigation', { name: '讨论阶段' })).getByText('新的主题')).toBeTruthy()
+  })
+
+  it('AI 建议初始为空，手动求助明确失败，暂停可由人切换', () => {
+    createDiscussion()
+    const panel = screen.getByRole('complementary', { name: '讨论与 AI' })
+    expect(within(panel).getByText('暂无 AI 建议')).toBeTruthy()
+    fireEvent.click(within(panel).getByRole('button', { name: '需要帮助' }))
+    expect(within(panel).getByRole('status').textContent).toContain('AI 服务未连接')
+    fireEvent.click(within(panel).getByRole('checkbox', { name: '暂停 AI' }))
+    expect((within(panel).getByRole('checkbox', { name: '暂停 AI' }) as HTMLInputElement).checked).toBe(true)
+    expect((within(panel).getByRole('button', { name: '需要帮助' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(within(panel).getByRole('checkbox', { name: '暂停 AI' }))
+    expect((within(panel).getByRole('button', { name: '需要帮助' }) as HTMLButtonElement).disabled).toBe(false)
+    expect(within(panel).getByText('暂无 AI 建议')).toBeTruthy()
+  })
+
+  it.each([['Add idea', '观点'], ['Add question', '问题'], ['Add risk', '风险'], ['Add evidence', '补充信息'], ['Add proposal', '候选方案']])('手动 %s 记录当前作者、类型、时间、来源和修改版本', async (button, type) => {
+    createDiscussion()
+    fireEvent.click(screen.getByRole('button', { name: button }))
+    const inspector = await screen.findByRole('complementary', { name: 'Element inspector' })
+    expect(within(inspector).getByText('小林')).toBeTruthy()
+    expect(within(inspector).getByText(type)).toBeTruthy()
+    expect(within(inspector).getByText('直接创建')).toBeTruthy()
+    expect(within(inspector).getByText('版本 1')).toBeTruthy()
+    expect(inspector.querySelector('time')?.getAttribute('dateTime')).toMatch(/^\d{4}-/)
+    expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('')
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: '成员自己的文字' } })
+    fireEvent.blur(screen.getByLabelText('Title'))
+    expect(within(inspector).getByText('版本 2')).toBeTruthy()
+  })
+
+  it.each(['Decision matrix', 'Concept cards', 'Checklist'])('手动创建 %s 没有预设记录', async (name) => {
+    createDiscussion()
+    fireEvent.click(screen.getByRole('button', { name }))
+    const id = window.localStorage.getItem('canvas-relay-current-board-v2')
+    await waitFor(() => {
+      const board = JSON.parse(window.localStorage.getItem(`canvas-relay-board-v2:${id}`) || 'null')
+      expect(board.nodes).toHaveLength(1)
+      expect(board.nodes[0].data.artifact.records).toEqual([])
+    })
+  })
+
+  function addProposal() {
+    fireEvent.change(screen.getByLabelText('新方案标题'), { target: { value: '成员填写的方案' } })
+    fireEvent.change(screen.getByLabelText('新方案说明'), { target: { value: '成员填写的做法' } })
+    fireEvent.click(screen.getByRole('button', { name: '添加候选方案' }))
+  }
+
+  it('候选方案可编辑来源、组合逻辑、风险和待确认事项，五类评论全部保留', () => {
+    createDiscussion()
+    fireEvent.click(screen.getByRole('button', { name: 'Add idea' }))
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: '原始观点' } })
+    addProposal()
+    const proposal = screen.getByRole('region', { name: '方案：成员填写的方案' })
+    fireEvent.change(within(proposal).getByLabelText('方案标题'), { target: { value: '修改后的方案' } })
+    fireEvent.change(within(proposal).getByLabelText('组合逻辑'), { target: { value: '保留原始观点' } })
+    fireEvent.change(within(proposal).getByLabelText('方案风险'), { target: { value: '资源不足' } })
+    fireEvent.change(within(proposal).getByLabelText('待确认事项'), { target: { value: '确认场地' } })
+    fireEvent.click(within(proposal).getByRole('checkbox', { name: '原始观点' }))
+    for (const [kind, label] of [['support', '支持'], ['oppose', '反对'], ['supplement', '补充'], ['risk', '风险'], ['verify', '待验证']]) {
+      fireEvent.change(within(proposal).getByLabelText('评论类型'), { target: { value: kind } })
+      fireEvent.change(within(proposal).getByLabelText('评论内容'), { target: { value: `${label}的意见` } })
+      fireEvent.click(within(proposal).getByRole('button', { name: '添加方案评论' }))
+      expect(within(proposal).getByText(`${label}的意见`)).toBeTruthy()
+    }
+    expect(within(proposal).getByText('反对的意见')).toBeTruthy()
+    expect(within(proposal).getByText('小林', { selector: '.proposal-author' })).toBeTruthy()
+  })
+
+  it('人工决策可编辑标准、评分理由和投票，并放入现有白板矩阵', async () => {
+    createDiscussion()
+    addProposal()
+    fireEvent.click(screen.getByRole('button', { name: '辅助决策' }))
+    fireEvent.change(screen.getByLabelText('新标准名称'), { target: { value: '可实现性' } })
+    fireEvent.change(screen.getByLabelText('新标准权重'), { target: { value: '2' } })
+    fireEvent.click(screen.getByRole('button', { name: '添加决策标准' }))
+    fireEvent.change(screen.getByLabelText('标准名称'), { target: { value: '人力成本' } })
+    fireEvent.change(screen.getByLabelText('标准权重'), { target: { value: '3' } })
+    fireEvent.change(screen.getByLabelText('评分'), { target: { value: '7' } })
+    fireEvent.change(screen.getByLabelText('评分理由'), { target: { value: '成员给出的理由' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存评分' }))
+    expect(screen.getByText('成员给出的理由', { selector: 'p' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '投票支持此方案' }))
+    expect(screen.getByText('票数：1')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '撤回我的投票' }))
+    expect(screen.getByText('票数：0')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '放入白板矩阵' }))
+    const id = window.localStorage.getItem('canvas-relay-current-board-v2')
+    await waitFor(() => {
+      const board = JSON.parse(window.localStorage.getItem(`canvas-relay-board-v2:${id}`) || 'null')
+      const matrix = board.nodes.find((node: { data: { artifact?: { artifactType: string } } }) => node.data.artifact?.artifactType === 'matrix').data.artifact
+      expect(matrix.records[0]).toMatchObject({ proposal: '成员填写的方案', criterion: '人力成本', score: 7, reason: '成员给出的理由', weight: 3 })
+    })
+  })
+
+  it('成果草稿和最终方案经成员确认才能导出，继续修改会取消确认', () => {
+    createDiscussion()
+    addProposal()
+    fireEvent.click(screen.getByRole('button', { name: '接受方案' }))
+    fireEvent.click(screen.getByRole('button', { name: '成果输出' }))
+    const exportButton = screen.getByRole('button', { name: '导出讨论成果' }) as HTMLButtonElement
+    expect(exportButton.disabled).toBe(true)
+    expect((screen.getByLabelText('成果草稿') as HTMLTextAreaElement).value).toBe('')
+    fireEvent.change(screen.getByLabelText('成果草稿'), { target: { value: '成员确认的结果与理由' } })
+    fireEvent.change(screen.getByLabelText('最终方案'), { target: { value: (screen.getByLabelText('最终方案') as HTMLSelectElement).options[1].value } })
+    fireEvent.click(screen.getByRole('button', { name: '确认最终结果' }))
+    expect(exportButton.disabled).toBe(false)
+    fireEvent.change(screen.getByLabelText('成果草稿'), { target: { value: '修改后的结果' } })
+    expect(exportButton.disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: '确认最终结果' }))
+    expect(exportButton.disabled).toBe(false)
+    fireEvent.change(screen.getByLabelText('方案说明'), { target: { value: '改变实施步骤' } })
+    expect(exportButton.disabled).toBe(true)
+  })
+
+  it('工具栏方案与检查器保持同一份方案，修改原始观点会取消成果确认', () => {
+    createDiscussion()
+    fireEvent.click(screen.getByRole('button', { name: 'Add proposal' }))
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: '从白板创建的方案' } })
+    expect((screen.getByLabelText('方案标题') as HTMLInputElement).value).toBe('从白板创建的方案')
+    fireEvent.click(screen.getByRole('button', { name: '接受方案' }))
+    fireEvent.click(screen.getByRole('button', { name: '成果输出' }))
+    fireEvent.change(screen.getByLabelText('成果草稿'), { target: { value: '完成结果' } })
+    const finalSelect = screen.getByLabelText('最终方案') as HTMLSelectElement
+    fireEvent.change(finalSelect, { target: { value: finalSelect.options[1].value } })
+    fireEvent.click(screen.getByRole('button', { name: '确认最终结果' }))
+    expect((screen.getByRole('button', { name: '导出讨论成果' }) as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.change(screen.getByLabelText('Details'), { target: { value: '修改白板方案内容' } })
+    expect((screen.getByLabelText('方案说明') as HTMLTextAreaElement).value).toBe('修改白板方案内容')
+    expect((screen.getByRole('button', { name: '导出讨论成果' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('成员加入和切换后新观点使用当前成员身份，复制观点保留来源而不冒用原作者', () => {
+    createDiscussion()
+    fireEvent.click(screen.getByRole('button', { name: 'Add idea' }))
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: '第一位成员的观点' } })
+    fireEvent.change(screen.getByLabelText('新成员昵称'), { target: { value: '小夏' } })
+    fireEvent.click(screen.getByRole('button', { name: '添加成员' }))
+    const member = screen.getByLabelText('当前成员') as HTMLSelectElement
+    fireEvent.change(member, { target: { value: member.options[1].value } })
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }))
+    const inspector = screen.getByRole('complementary', { name: 'Element inspector' })
+    expect(within(inspector).getByText('小夏')).toBeTruthy()
+    expect(within(inspector).getByText('版本 1')).toBeTruthy()
+    expect(within(inspector).queryByText('直接创建')).toBeNull()
+  })
+
+  it('删除方案卡会清理对应决策并取消成果确认', () => {
+    createDiscussion()
+    addProposal()
+    fireEvent.click(screen.getByRole('button', { name: '接受方案' }))
+    fireEvent.click(screen.getByRole('button', { name: '成果输出' }))
+    fireEvent.change(screen.getByLabelText('成果草稿'), { target: { value: '确认内容' } })
+    const finalSelect = screen.getByLabelText('最终方案') as HTMLSelectElement
+    fireEvent.change(finalSelect, { target: { value: finalSelect.options[1].value } })
+    fireEvent.click(screen.getByRole('button', { name: '确认最终结果' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    expect((screen.getByRole('button', { name: '导出讨论成果' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByLabelText('最终方案') as HTMLSelectElement).options).toHaveLength(1)
+  })
+
+  it('白板撤销和重做同步还原方案编辑与删除', () => {
+    createDiscussion()
+    addProposal()
+    fireEvent.change(screen.getByLabelText('方案标题'), { target: { value: '修改后的标题' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect((screen.getByLabelText('方案标题') as HTMLInputElement).value).toBe('成员填写的方案')
+    fireEvent.click(screen.getByRole('button', { name: 'Redo' }))
+    expect((screen.getByLabelText('方案标题') as HTMLInputElement).value).toBe('修改后的标题')
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    expect(screen.queryByLabelText('方案标题')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect((screen.getByLabelText('方案标题') as HTMLInputElement).value).toBe('修改后的标题')
+  })
+
+  it('侧栏编辑方案内容同样记录白板版本', () => {
+    createDiscussion()
+    addProposal()
+    const inspector = screen.getByRole('complementary', { name: 'Element inspector' })
+    expect(within(inspector).getByText('版本 1')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('方案说明'), { target: { value: '修改了做法' } })
+    expect(within(inspector).getByText('版本 2')).toBeTruthy()
+  })
+
+  it('切换讨论阶段不会注销已有的白板协作工具', () => {
+    let registrationSignal: AbortSignal | undefined
+    Object.defineProperty(document, 'modelContext', { configurable: true, value: {
+      registerTool: (_tool: unknown, options?: { signal?: AbortSignal }) => { registrationSignal = options?.signal },
+    } })
+    createDiscussion()
+    const activeSignal = registrationSignal!
+    expect(activeSignal.aborted).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: '下一阶段' }))
+    expect(activeSignal.aborted).toBe(false)
   })
 
   it('真实创建的白板没有节点、连线或演示入口，记录功能仍可使用', () => {

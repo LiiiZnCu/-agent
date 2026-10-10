@@ -39,7 +39,9 @@ import { Inspector } from './components/Inspector'
 import { LayerMenu } from './components/LayerMenu'
 import { ShareModal } from './components/ShareModal'
 import { ToolRail } from './components/ToolRail'
-import { BRAINSTORM_STAGES, createBrainstormSession, setBrainstormStage } from './lib/brainstorm'
+import { createBrainstormSession, createIdeaMeta, updateIdeaMeta } from './lib/brainstorm'
+import { StageNavigator } from './components/StageNavigator'
+import { BrainstormPanel } from './components/BrainstormPanel'
 import { createArtifactTemplate, validateArtifactSpec } from './lib/artifacts'
 import { arrangeGroupNodes, arrangeNodes, calculateClusterBounds, createBoardEdge, createBoardNode, createEmptyBoard, createId, createUUID, moveNodeLayer, serializeSnapshot } from './lib/board'
 import { importCanvasRelay, listBoards, loadBoard, loadBoardById, saveBoard } from './lib/storage'
@@ -57,6 +59,7 @@ import type {
   BoardSummary,
   BrainstormSession,
   ElementKind,
+  IdeaType,
   LayerAction,
   MuralFocusClaim,
   RecordingActions,
@@ -64,6 +67,7 @@ import type {
 } from './types'
 
 const NODE_TYPES = { boardElement: BoardElement }
+type HistoryEntry = { board: BoardSnapshot; discussion: BrainstormSession | null }
 
 function copySnapshot(snapshot: BoardSnapshot): BoardSnapshot {
   return structuredClone(snapshot)
@@ -148,8 +152,9 @@ function Workspace() {
   const nameRef = useRef(name)
   const boardIdRef = useRef(boardId)
   const boardCreatedAtRef = useRef(boardCreatedAt)
-  const historyRef = useRef<BoardSnapshot[]>([])
-  const futureRef = useRef<BoardSnapshot[]>([])
+  const historyRef = useRef<HistoryEntry[]>([])
+  const futureRef = useRef<HistoryEntry[]>([])
+  const sessionRef = useRef(session)
   const recordingRef = useRef(recording)
   const broadcastRef = useRef<BroadcastChannel | null>(null)
   const remoteSyncRef = useRef(false)
@@ -161,7 +166,17 @@ function Workspace() {
   const hostedPullRef = useRef(false)
   const [historyStatus, setHistoryStatus] = useState({ canUndo: false, canRedo: false })
 
+  const reviseDiscussionNode = useCallback((node: BoardNode) => {
+    setSession((current) => current ? {
+      ...current,
+      proposals: current.proposals.map((proposal) => proposal.id === node.id ? { ...proposal, title: node.data.title, description: node.data.body } : proposal),
+      decision: current.decision ? { ...current.decision, confirmedAt: undefined, confirmedBy: undefined } : null,
+      updatedAt: new Date().toISOString(),
+    } : null)
+  }, [])
+
   useEffect(() => { nodesRef.current = nodes }, [nodes])
+  useEffect(() => { sessionRef.current = session }, [session])
   useEffect(() => { edgesRef.current = edges }, [edges])
   useEffect(() => { nameRef.current = name }, [name])
   useEffect(() => { boardIdRef.current = boardId }, [boardId])
@@ -323,7 +338,7 @@ function Workspace() {
   }, [])
 
   const recordHistory = useCallback(() => {
-    historyRef.current = [...historyRef.current.slice(-39), copySnapshot(snapshotNow())]
+    historyRef.current = [...historyRef.current.slice(-39), { board: copySnapshot(snapshotNow()), discussion: structuredClone(sessionRef.current) }]
     futureRef.current = []
     setHistoryStatus({ canUndo: true, canRedo: false })
   }, [snapshotNow])
@@ -384,8 +399,9 @@ function Workspace() {
   const undo = useCallback(() => {
     const previous = historyRef.current.pop()
     if (!previous) return
-    futureRef.current = [copySnapshot(snapshotNow()), ...futureRef.current.slice(0, 39)]
-    applySnapshot(previous)
+    futureRef.current = [{ board: copySnapshot(snapshotNow()), discussion: structuredClone(sessionRef.current) }, ...futureRef.current.slice(0, 39)]
+    applySnapshot(previous.board, true)
+    setSession(previous.discussion)
     setHistoryStatus({ canUndo: historyRef.current.length > 0, canRedo: true })
     reportActivity('Undo', 'Restored the previous board state', 'human')
   }, [applySnapshot, reportActivity, snapshotNow])
@@ -393,8 +409,9 @@ function Workspace() {
   const redo = useCallback(() => {
     const next = futureRef.current.shift()
     if (!next) return
-    historyRef.current.push(copySnapshot(snapshotNow()))
-    applySnapshot(next)
+    historyRef.current.push({ board: copySnapshot(snapshotNow()), discussion: structuredClone(sessionRef.current) })
+    applySnapshot(next.board, true)
+    setSession(next.discussion)
     setHistoryStatus({ canUndo: true, canRedo: futureRef.current.length > 0 })
     reportActivity('Redo', 'Reapplied the board change', 'human')
   }, [applySnapshot, reportActivity, snapshotNow])
@@ -446,10 +463,16 @@ function Workspace() {
   }, [])
 
   const addElement = useCallback((input: AddElementInput, source: Activity['source'] = 'human') => {
+    const discussion = sessionRef.current
     recordHistory()
     const fallback = getCenterPosition(nodesRef.current.length % 5 * 24)
     const node = createBoardNode(input, fallback)
-    const next = [...nodesRef.current, node]
+    if (discussion && node.data.kind !== 'frame') {
+      node.data.ideaMeta = createIdeaMeta({ sessionId: discussion.id, authorId: discussion.currentMemberId, type: input.ideaType ?? (node.data.kind === 'question' ? 'question' : node.data.kind === 'insight' ? 'evidence' : 'idea'), createdAt: new Date().toISOString() })
+      if (!input.title.trim()) node.data.title = ''
+    }
+    node.selected = true
+    const next = [...nodesRef.current.map((existing) => ({ ...existing, selected: false })), node]
     commitNodes(next)
     setSelectedId(node.id)
     reportActivity('Element added', node.data.title, source, [node.id])
@@ -482,10 +505,15 @@ function Workspace() {
       },
       data: { ...existing.data, ...cleanData, justCreated: source === 'agent' },
     }
+    const contentChanged = (patch.title !== undefined && patch.title !== existing.data.title)
+      || (patch.body !== undefined && patch.body !== existing.data.body)
+      || (patch.ideaMeta !== undefined && JSON.stringify(patch.ideaMeta.sourceIdeaIds) !== JSON.stringify(existing.data.ideaMeta?.sourceIdeaIds))
+    if (contentChanged && updated.data.ideaMeta && sessionRef.current) updated.data.ideaMeta = updateIdeaMeta(updated.data.ideaMeta, sessionRef.current.currentMemberId, new Date().toISOString())
     commitNodes(nodesRef.current.map((node) => node.id === id ? updated : node))
+    reviseDiscussionNode(updated)
     reportActivity('Element updated', updated.data.title, source, [updated.id])
     return updated
-  }, [commitNodes, recordHistory, reportActivity])
+  }, [commitNodes, recordHistory, reportActivity, reviseDiscussionNode])
 
   const removeElements = useCallback((ids: string[], source: Activity['source'] = 'human') => {
     const validIds = new Set(nodesRef.current.filter((node) => ids.includes(node.id)).map((node) => node.id))
@@ -493,6 +521,10 @@ function Workspace() {
     recordHistory()
     commitNodes(nodesRef.current.filter((node) => !validIds.has(node.id)))
     commitEdges(edgesRef.current.filter((edge) => !validIds.has(edge.source) && !validIds.has(edge.target)))
+    setSession((current) => current ? {
+      ...current, proposals: current.proposals.filter((proposal) => !validIds.has(proposal.id)),
+      decision: current.decision ? { ...current.decision, scores: current.decision.scores.filter((score) => !validIds.has(score.proposalId)), votes: current.decision.votes.filter((vote) => !validIds.has(vote.proposalId)), finalProposalId: current.decision.finalProposalId && validIds.has(current.decision.finalProposalId) ? undefined : current.decision.finalProposalId, confirmedAt: undefined, confirmedBy: undefined } : null,
+    } : null)
     setSelectedId((current) => current && validIds.has(current) ? null : current)
     reportActivity('Elements removed', `${validIds.size} deleted`, source)
     return validIds.size
@@ -1054,7 +1086,12 @@ function Workspace() {
     const names: Record<ElementKind, string> = {
       idea: 'New idea', question: 'What should we explore?', insight: 'New insight', action: 'Next action', frame: 'New cluster', artifact: 'New artifact',
     }
-    addElement({ title: names[kind], kind })
+    addElement({ title: session ? '' : names[kind], kind })
+  }, [addElement, session])
+
+  const addIdea = useCallback((type: IdeaType) => {
+    const node = addElement({ title: '', kind: type === 'question' ? 'question' : type === 'evidence' ? 'insight' : 'idea', ideaType: type })
+    if (type === 'proposal') setSession((current) => current ? { ...current, proposals: [...current.proposals, { id: node.id, title: '', description: '', sourceIdeaIds: [], authorId: current.currentMemberId, integrationLogic: '', risks: [], openQuestions: [], status: 'draft', comments: [] }] } : null)
   }, [addElement])
 
   const addArtifact = useCallback((template: 'decision' | 'cards' | 'checklist') => {
@@ -1062,15 +1099,21 @@ function Workspace() {
   }, [createArtifact])
 
   const updateFromInspector = useCallback((id: string, patch: Partial<BoardNode['data']>) => {
+    recordHistory()
     const next = nodesRef.current.map((node) => node.id === id ? { ...node, data: { ...node.data, ...patch } } : node)
     commitNodes(next)
-  }, [commitNodes])
+    const node = next.find((item) => item.id === id)
+    if (node) reviseDiscussionNode(node)
+  }, [commitNodes, recordHistory, reviseDiscussionNode])
 
   const commitInspectorChange = useCallback((id: string, field: string) => {
     const node = nodesRef.current.find((candidate) => candidate.id === id)
     if (!node) return
+    if (node.data.ideaMeta && session) {
+      commitNodes(nodesRef.current.map((item) => item.id === id ? { ...item, data: { ...item.data, ideaMeta: updateIdeaMeta(node.data.ideaMeta!, session.currentMemberId, new Date().toISOString()) } } : item))
+    }
     reportActivity('Element updated', `${node.data.title}: ${field}`, 'human', [id])
-  }, [reportActivity])
+  }, [commitNodes, reportActivity, session])
 
   const duplicateElement = useCallback((id: string) => {
     const existing = nodesRef.current.find((node) => node.id === id)
@@ -1083,10 +1126,11 @@ function Workspace() {
       selected: true,
       data: { ...structuredClone(existing.data), title: `${existing.data.title} copy`, justCreated: true },
     }
+    if (session && existing.data.ideaMeta) duplicate.data.ideaMeta = createIdeaMeta({ sessionId: session.id, authorId: session.currentMemberId, type: existing.data.ideaMeta.type, sourceIdeaIds: [id], createdAt: new Date().toISOString() })
     commitNodes([...nodesRef.current.map((node): BoardNode => ({ ...node, selected: false })), duplicate])
     setSelectedId(duplicate.id)
     reportActivity('Element duplicated', duplicate.data.title, 'human', [duplicate.id])
-  }, [commitNodes, recordHistory, reportActivity])
+  }, [commitNodes, recordHistory, reportActivity, session])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1399,10 +1443,7 @@ function Workspace() {
 
   return (
     <main className="app-shell">
-      {session && <nav className="discussion-stage-nav" aria-label="讨论阶段" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', padding: '12px 20px' }}>
-        <strong>{session.topic}</strong><span>{session.members.find((member) => member.id === session.currentMemberId)?.name}</span>
-        {BRAINSTORM_STAGES.map((stage) => <button key={stage.id} type="button" aria-current={session.stage === stage.id ? 'step' : undefined} onClick={() => setSession(setBrainstormStage(session, stage.id, new Date().toISOString()))}>{stage.label}</button>)}
-      </nav>}
+      {session && <StageNavigator key={session.id} session={session} onChange={setSession} />}
       <header className="top-bar">
         <div className="brand-lockup">
           <div className="brand-mark header-mark" role="img" aria-label="Mural logo"><span /><span /><span /></div>
@@ -1469,7 +1510,8 @@ function Workspace() {
       </header>
 
       <section className={`workspace ${replayBoard ? 'is-replaying' : ''}`}>
-        <ToolRail onAdd={addKind} onArtifact={addArtifact} />
+        {session && <BrainstormPanel key={session.id} session={session} nodes={nodes} actions={actions} onChange={setSession} />}
+        <ToolRail onAdd={addKind} onArtifact={addArtifact} onIdea={session ? addIdea : undefined} />
         <div className="canvas-wrap" data-focus-count={activeFocusClaims.length}>
           <ReactFlow<BoardNode, BoardEdge>
             nodes={replayBoard?.nodes ?? renderedNodes}
@@ -1569,6 +1611,7 @@ function Workspace() {
           <Inspector
             key={selectedNode.id}
             node={selectedNode}
+            members={session?.members}
             minimized={inspectorMinimized}
             onToggleMinimized={() => setInspectorMinimized((current) => !current)}
             onUpdate={updateFromInspector}

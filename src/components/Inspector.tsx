@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { ArrowDown, ArrowUp, ArrowsOutSimple, BracketsCurly, ChatCircleText, Copy, Minus, PaperPlaneTilt, Stack, ThumbsUp, Trash, X } from '@phosphor-icons/react'
-import type { BoardNode, ElementColor, LayerAction, RecordingEvent } from '../types'
+import type { BoardNode, BrainstormMember, ElementColor, LayerAction, RecordingEvent } from '../types'
+import { IDEA_LABELS } from '../lib/brainstorm'
 
 const COLORS: ElementColor[] = ['paper', 'sun', 'mint', 'sky', 'rose']
 
 type Props = {
   node: BoardNode
+  members?: BrainstormMember[]
   minimized: boolean
   onToggleMinimized: () => void
   onUpdate: (id: string, patch: Partial<BoardNode['data']>) => void
@@ -19,7 +21,7 @@ type Props = {
   onComment: (content: string) => void
 }
 
-export function Inspector({ node, minimized, onToggleMinimized, onUpdate, onCommit, onDelete, onDuplicate, onClose, onCopySpec, onLayer, comments, onComment }: Props) {
+export function Inspector({ node, members = [], minimized, onToggleMinimized, onUpdate, onCommit, onDelete, onDuplicate, onClose, onCopySpec, onLayer, comments, onComment }: Props) {
   const isArtifact = node.data.kind === 'artifact' && node.data.artifact
   const [comment, setComment] = useState('')
   const [activeTab, setActiveTab] = useState<'content' | 'comments'>('content')
@@ -47,6 +49,15 @@ export function Inspector({ node, minimized, onToggleMinimized, onUpdate, onComm
         <button type="button" className={activeTab === 'content' ? 'is-active' : ''} onClick={() => setActiveTab('content')}>Content</button>
         <button type="button" className={activeTab === 'comments' ? 'is-active' : ''} onClick={() => setActiveTab('comments')}><ChatCircleText size={15} />Comments <span>{comments.length}</span></button>
       </nav>}
+
+      {!minimized && node.data.ideaMeta && <section className="idea-metadata" aria-label="观点信息">
+        <dl><dt>作者</dt><dd>{members.find((member) => member.id === node.data.ideaMeta!.authorId)?.name ?? node.data.ideaMeta.authorId}</dd>
+          <dt>类型</dt><dd>{IDEA_LABELS[node.data.ideaMeta.type]}</dd>
+          <dt>创建时间</dt><dd><time dateTime={node.data.ideaMeta.createdAt}>{new Date(node.data.ideaMeta.createdAt).toLocaleString()}</time></dd>
+          <dt>来源</dt><dd>{node.data.ideaMeta.sourceIdeaIds.length ? node.data.ideaMeta.sourceIdeaIds.join('、') : '直接创建'}</dd>
+          <dt>修改记录</dt><dd>版本 {node.data.ideaMeta.versions.length + 1}</dd></dl>
+        {node.data.ideaMeta.versions.map((version, index) => <p key={index}>{members.find((member) => member.id === version.authorId)?.name ?? version.authorId} · <time dateTime={version.createdAt}>{new Date(version.createdAt).toLocaleString()}</time></p>)}
+      </section>}
 
       {!minimized && activeTab === 'content' && (isArtifact ? (
         <>

@@ -88,10 +88,7 @@ export function createArtifactTemplate(template: 'decision' | 'cards' | 'checkli
         { key: 'promise', label: 'Promise', type: 'text' },
         { key: 'audience', label: 'Audience', type: 'tag' },
       ],
-      records: [
-        { concept: 'Focus rooms', promise: 'Make deep work social without adding meetings.', audience: 'Hybrid teams' },
-        { concept: 'Energy map', promise: 'Show where teammates need support today.', audience: 'Team leads' },
-      ],
+      records: [],
       presentation: { layout: 'grid', density: 'comfortable' },
     }
   }
@@ -107,11 +104,7 @@ export function createArtifactTemplate(template: 'decision' | 'cards' | 'checkli
         { key: 'task', label: 'Task', type: 'text', required: true },
         { key: 'owner', label: 'Owner', type: 'text' },
       ],
-      records: [
-        { done: true, task: 'Choose the riskiest assumption', owner: 'Team' },
-        { done: false, task: 'Interview three participants', owner: 'Research' },
-        { done: false, task: 'Share the result', owner: 'Facilitator' },
-      ],
+      records: [],
       presentation: { layout: 'list', density: 'comfortable' },
     }
   }
@@ -127,11 +120,7 @@ export function createArtifactTemplate(template: 'decision' | 'cards' | 'checkli
       { key: 'effort', label: 'Effort', type: 'status', options: ['High', 'Medium', 'Low'] },
       { key: 'owner', label: 'Owner', type: 'text' },
     ],
-    records: [
-      { option: 'Walking stand-ups', impact: 'High', effort: 'Low', owner: 'People team' },
-      { option: 'Energy map', impact: 'High', effort: 'Medium', owner: 'Product' },
-      { option: 'Focus rooms', impact: 'Medium', effort: 'Low', owner: 'Operations' },
-    ],
+    records: [],
     presentation: { layout: 'table', density: 'compact' },
   }
 }
