@@ -1,5 +1,12 @@
 import { integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
+export const brainstormSessions = sqliteTable('brainstorm_sessions', {
+  id: text('id').primaryKey(),
+  boardId: text('board_id').notNull(),
+  payloadJson: text('payload_json').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
 export const sessions = sqliteTable('sessions', {
   id: text('id').primaryKey(),
   specVersion: text('spec_version').notNull(),

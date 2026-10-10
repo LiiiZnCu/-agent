@@ -11,6 +11,13 @@ const sqlite = new Database(databasePath)
 sqlite.pragma('journal_mode = WAL')
 sqlite.pragma('foreign_keys = ON')
 sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS brainstorm_sessions (
+    id TEXT PRIMARY KEY,
+    board_id TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS brainstorm_board_idx ON brainstorm_sessions(board_id, updated_at);
   CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     spec_version TEXT NOT NULL,

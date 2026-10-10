@@ -1,13 +1,16 @@
 import express from 'express'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import type { BoardSnapshot, RecordingSession } from '../src/types.ts'
 import { databasePath } from './db.ts'
 import { toCsv, toMarkdown } from './export.ts'
 import { deleteSession, getSession, getSessionByBoardId, saveSession } from './store.ts'
+import { getBrainstorm, getBrainstormByBoardId, saveBrainstorm } from './brainstorm-store.ts'
+import { validateBrainstormPayload, type StoredBrainstorm } from '../src/lib/brainstorm-validation.ts'
 import { assertHostedWritable, authorizeHostedMural, createHostedInvites, createHostedMural, getHostedMural, redeemHostedInvite, rotateHostedUserShare, saveHostedMural, setHostedFocus, type HostedGuest } from './hosted.ts'
 
-const app = express()
+export const app = express()
 const port = Number(process.env.CANVAS_RELAY_PORT || 5174)
 const distPath = join(process.cwd(), 'dist')
 
@@ -16,6 +19,35 @@ app.use(express.json({ limit: '3mb' }))
 
 app.get('/api/health', (_request, response) => {
   response.json({ ok: true, storage: 'drizzle-sqlite', databasePath })
+})
+
+app.get('/api/brainstorm/:id', (request, response) => {
+  const stored = getBrainstorm(request.params.id)
+  if (!stored) return response.status(404).json({ error: '讨论不存在。' })
+  try {
+    authorizeHostedMural(stored.board.id, bearer(request))
+  } catch {
+    return response.status(403).json({ error: '没有访问此讨论的权限。' })
+  }
+  return response.json(stored)
+})
+
+app.put('/api/brainstorm/:id', (request, response) => {
+  let payload: StoredBrainstorm
+  try {
+    payload = validateBrainstormPayload(request.body, request.params.id)
+  } catch (error) {
+    return response.status(400).json({ error: error instanceof Error ? error.message : '讨论数据无效。' })
+  }
+  const existing = getBrainstorm(request.params.id)
+  if (existing && existing.board.id !== payload.board.id) return response.status(409).json({ error: '讨论不能迁移到另一个白板。' })
+  try {
+    authorizeHostedMural(payload.board.id, bearer(request))
+  } catch {
+    return response.status(403).json({ error: '没有保存此讨论的权限。' })
+  }
+  saveBrainstorm(payload)
+  return response.json({ ok: true, sessionId: payload.session.id })
 })
 
 function bearer(request: express.Request) {
@@ -83,7 +115,7 @@ app.get('/api/murals/:id', (request, response) => {
   try {
     const hosted = getHostedMural(request.params.id, bearer(request))
     if (!hosted) return response.status(404).json({ error: 'Mural not found.' })
-    return response.json({ ...hosted, session: getSessionByBoardId(request.params.id)?.session ?? null })
+    return response.json({ ...hosted, session: getSessionByBoardId(request.params.id)?.session ?? null, brainstorm: getBrainstormByBoardId(request.params.id)?.session ?? null })
   } catch (error) {
     return response.status(403).json({ error: error instanceof Error ? error.message : 'Mural access denied.' })
   }
@@ -196,6 +228,8 @@ app.use((error: unknown, _request: express.Request, response: express.Response, 
   response.status(500).json({ error: message })
 })
 
-app.listen(port, () => {
-  process.stdout.write(`Canvas Relay API listening on http://localhost:${port}\n`)
-})
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  app.listen(port, () => {
+    process.stdout.write(`Canvas Relay API listening on http://localhost:${port}\n`)
+  })
+}

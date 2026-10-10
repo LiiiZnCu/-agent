@@ -50,6 +50,7 @@ export type BoardEdge = Edge
 
 export type BoardSnapshot = {
   id: string
+  brainstormSessionId?: string
   name: string
   nodes: BoardNode[]
   edges: BoardEdge[]

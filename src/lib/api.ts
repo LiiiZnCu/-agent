@@ -1,4 +1,5 @@
-import type { AgentFocus, BoardSnapshot, HostedInvitation, HostedMuralAccess, MuralFocusClaim, RecordingParticipant, RecordingSession } from '../types'
+import type { AgentFocus, BoardSnapshot, BrainstormSession, HostedInvitation, HostedMuralAccess, MuralFocusClaim, RecordingParticipant, RecordingSession } from '../types'
+import { validateBrainstormPayload } from './brainstorm-validation'
 
 async function jsonResponse<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => null) as (T & { error?: string }) | null
@@ -32,6 +33,21 @@ export async function syncRecording(session: RecordingSession, finalBoard: Board
   return response.json() as Promise<{ ok: true; sessionId: string; eventCount: number }>
 }
 
+export async function syncBrainstorm(session: BrainstormSession, board: BoardSnapshot, accessToken = '') {
+  const payload = validateBrainstormPayload({ session, board })
+  return jsonResponse<{ ok: true; sessionId: string }>(await fetch(`/api/brainstorm/${encodeURIComponent(session.id)}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
+    body: JSON.stringify(payload),
+  }))
+}
+
+export async function loadBrainstormSession(id: string, accessToken = '') {
+  const payload = await jsonResponse<unknown>(await fetch(`/api/brainstorm/${encodeURIComponent(id)}`, {
+    headers: { Accept: 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
+  }))
+  return validateBrainstormPayload(payload, id)
+}
+
 export async function createHostedMural(name: string, board?: BoardSnapshot) {
   return jsonResponse<HostedMuralAccess>(await fetch('/api/murals', {
     method: 'POST',
@@ -48,9 +64,11 @@ export async function createUserShare(muralId: string, ownerToken: string) {
 }
 
 export async function loadHostedMural(id: string, accessToken: string) {
-  return jsonResponse<{ board: BoardSnapshot; revision: number; role: 'owner' | 'user' | 'agent'; session: RecordingSession | null; focusClaims: MuralFocusClaim[] }>(await fetch(`/api/murals/${encodeURIComponent(id)}`, {
+  const hosted = await jsonResponse<{ board: BoardSnapshot; revision: number; role: 'owner' | 'user' | 'agent'; session: RecordingSession | null; brainstorm: BrainstormSession | null; focusClaims: MuralFocusClaim[] }>(await fetch(`/api/murals/${encodeURIComponent(id)}`, {
     headers: { Accept: 'application/json', Authorization: `Bearer ${accessToken}` },
   }))
+  if (hosted.brainstorm) validateBrainstormPayload({ board: hosted.board, session: hosted.brainstorm })
+  return hosted
 }
 
 export async function setHostedFocus(muralId: string, accessToken: string, participant: Pick<RecordingParticipant, 'id' | 'name' | 'color'>, focus: AgentFocus | null) {

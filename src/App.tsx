@@ -44,8 +44,9 @@ import { StageNavigator } from './components/StageNavigator'
 import { BrainstormPanel } from './components/BrainstormPanel'
 import { createArtifactTemplate, validateArtifactSpec } from './lib/artifacts'
 import { arrangeGroupNodes, arrangeNodes, calculateClusterBounds, createBoardEdge, createBoardNode, createEmptyBoard, createId, createUUID, moveNodeLayer, serializeSnapshot } from './lib/board'
-import { importCanvasRelay, listBoards, loadBoard, loadBoardById, saveBoard } from './lib/storage'
-import { assertHostedWritable, createAgentInvites as createHostedAgentInvites, createHostedMural as createHostedMuralApi, createUserShare as createHostedUserShare, getBackendHealth, loadHostedMural, redeemAgentInvite as redeemHostedAgentInvite, saveHostedMural, setHostedFocus, syncRecording } from './lib/api'
+import { importCanvasRelay, listBoards, loadBoard, loadBoardById } from './lib/storage'
+import { loadBrainstorm, saveBrainstormBoard } from './lib/brainstorm-storage'
+import { assertHostedWritable, createAgentInvites as createHostedAgentInvites, createHostedMural as createHostedMuralApi, createUserShare as createHostedUserShare, getBackendHealth, loadHostedMural, redeemAgentInvite as redeemHostedAgentInvite, saveHostedMural, setHostedFocus, syncBrainstorm, syncRecording } from './lib/api'
 import { activeFocusParticipants, addRecordingCheckpoint, appendEvent, completeRecording, createRecordingSession, deleteRecordingCheckpoint, joinRecording, loadRecording, moderateRecording, recordingToCsv, recordingToMarkdown, renameRecordingCheckpoint, saveRecording, setRecordingFocus, watchRecording } from './lib/recording'
 import { registerWebMCP, TOOL_CATALOG } from './lib/webmcp'
 import type {
@@ -100,7 +101,7 @@ function Workspace() {
     return { ...placeholder, id: requestedId }
   })
   const [showCreation, setShowCreation] = useState(fresh)
-  const [session, setSession] = useState<BrainstormSession | null>(null)
+  const [session, setSession] = useState<BrainstormSession | null>(() => loadBrainstorm(initial))
   const [discussionDraft, setDiscussionDraft] = useState({ topic: '', goal: '', background: '', constraints: '', memberName: '' })
   const [boardId, setBoardId] = useState(initial.id)
   const [boardCreatedAt, setBoardCreatedAt] = useState(initial.createdAt)
@@ -164,6 +165,7 @@ function Workspace() {
   const hostedRevisionRef = useRef(0)
   const hostedReadyRef = useRef(false)
   const hostedPullRef = useRef(false)
+  const syncedDiscussionRef = useRef('')
   const [historyStatus, setHistoryStatus] = useState({ canUndo: false, canRedo: false })
 
   const reviseDiscussionNode = useCallback((node: BoardNode) => {
@@ -198,6 +200,7 @@ function Workspace() {
 
   const snapshotNow = useCallback((): BoardSnapshot => ({
     id: boardIdRef.current,
+    brainstormSessionId: sessionRef.current?.id,
     name: nameRef.current,
     nodes: structuredClone(nodesRef.current.map(({ selected: _selected, dragging: _dragging, ...node }) => node)),
     edges: structuredClone(edgesRef.current),
@@ -350,6 +353,7 @@ function Workspace() {
       edgeTombstonesRef.current = { ...edgeTombstonesRef.current, ...copy.sync.edgeTombstones }
     }
     if (copy.id !== boardIdRef.current) {
+      sessionRef.current = null
       setSession(null)
       nodeTombstonesRef.current = { ...(copy.sync?.nodeTombstones ?? {}) }
       edgeTombstonesRef.current = { ...(copy.sync?.edgeTombstones ?? {}) }
@@ -667,7 +671,21 @@ function Workspace() {
   }, [commitEdges, commitNodes, recordHistory, reportActivity])
 
   const createHostedMural = useCallback<BoardActions['createHostedMural']>(async (title, initialBoard) => {
+    const discussion = sessionRef.current
+    saveBrainstormBoard(snapshotNow(), discussion)
     const hosted = await createHostedMuralApi(title, initialBoard)
+    let hostedDiscussion: BrainstormSession | null = null
+    if (discussion && initialBoard?.id === discussion.boardId) {
+      const nextId = createUUID()
+      const remapBoard = (board: BoardSnapshot): BoardSnapshot => ({ ...board, id: hosted.board.id, brainstormSessionId: nextId, nodes: board.nodes.map((node) => node.data.ideaMeta ? { ...node, data: { ...node.data, ideaMeta: { ...node.data.ideaMeta, sessionId: nextId } } } : node) })
+      hosted.board = remapBoard(hosted.board)
+      hostedDiscussion = { ...structuredClone(discussion), id: nextId, boardId: hosted.board.id, suggestions: discussion.suggestions.map((suggestion) => ({ ...suggestion, boardBeforeAccept: suggestion.boardBeforeAccept ? remapBoard(suggestion.boardBeforeAccept) : undefined })), updatedAt: new Date().toISOString() }
+      const saved = await saveHostedMural(hosted.board, hosted.ownerToken)
+      hosted.board = saved.board
+      hosted.revision = saved.revision
+      await syncBrainstorm(hostedDiscussion, hosted.board, hosted.ownerToken)
+      syncedDiscussionRef.current = JSON.stringify(hostedDiscussion)
+    }
     hostedRevisionRef.current = hosted.revision
     hostedReadyRef.current = true
     setHostedAccessToken(hosted.ownerToken)
@@ -679,11 +697,13 @@ function Workspace() {
     url.hash = `owner=${encodeURIComponent(hosted.ownerToken)}`
     window.history.replaceState({}, '', url)
     applySnapshot(hosted.board)
-    saveBoard(hosted.board)
+    sessionRef.current = hostedDiscussion
+    setSession(hostedDiscussion)
+    saveBrainstormBoard(hosted.board, hostedDiscussion)
     setBoardList(listBoards())
     announce('Hosted mural created with separate user and agent access')
     return hosted
-  }, [announce, applySnapshot])
+  }, [announce, applySnapshot, snapshotNow])
 
   const createUserShare = useCallback<BoardActions['createUserShare']>(async (muralId, ownerToken) => {
     const share = await createHostedUserShare(muralId, ownerToken)
@@ -752,6 +772,9 @@ function Workspace() {
     hostedPullRef.current = true
     setHostedFocusClaims(hosted.focusClaims)
     applySnapshot(hosted.board)
+    syncedDiscussionRef.current = JSON.stringify(hosted.brainstorm ?? null)
+    sessionRef.current = hosted.brainstorm ?? null
+    setSession(hosted.brainstorm ?? null)
     recordingRef.current = hosted.session
     setRecording(hosted.session)
     return participant
@@ -952,7 +975,7 @@ function Workspace() {
     if (showCreation) return
     const timer = window.setTimeout(() => {
       try {
-        saveBoard(snapshotNow())
+        saveBrainstormBoard(snapshotNow(), sessionRef.current)
         setBoardList(listBoards())
         setSaveState('saved')
       } catch {
@@ -960,7 +983,7 @@ function Workspace() {
       }
     }, 180)
     return () => window.clearTimeout(timer)
-  }, [boardId, edges, name, nodes, showCreation, snapshotNow])
+  }, [boardId, edges, name, nodes, session, showCreation, snapshotNow])
 
   useEffect(() => {
     const requestedId = new URLSearchParams(window.location.search).get('mural')
@@ -974,7 +997,10 @@ function Workspace() {
       setHostedRole(hosted.role)
       setHostedFocusClaims(hosted.focusClaims)
       applySnapshot(hosted.board)
-      saveBoard(hosted.board)
+      syncedDiscussionRef.current = JSON.stringify(hosted.brainstorm ?? null)
+      sessionRef.current = hosted.brainstorm ?? null
+      setSession(hosted.brainstorm ?? null)
+      saveBrainstormBoard(hosted.board, hosted.brainstorm ?? null)
       setBoardList(listBoards())
       recordingRef.current = hosted.session
       setRecording(hosted.session)
@@ -993,7 +1019,8 @@ function Workspace() {
     }
     const timer = window.setTimeout(() => {
       const pending = snapshotNow()
-      saveHostedMural(pending, hostedAccessToken).then((saved) => {
+      const pendingDiscussion = structuredClone(sessionRef.current)
+      saveHostedMural(pending, hostedAccessToken).then(async (saved) => {
         hostedRevisionRef.current = saved.revision
         const canonicalChanged = saved.board.name !== pending.name
           || JSON.stringify(saved.board.nodes) !== JSON.stringify(pending.nodes)
@@ -1002,11 +1029,15 @@ function Workspace() {
           hostedPullRef.current = true
           applySnapshot(saved.board, true)
         }
+        if (pendingDiscussion && sessionRef.current?.id === pendingDiscussion.id) {
+          await syncBrainstorm(pendingDiscussion, saved.board, hostedAccessToken)
+          syncedDiscussionRef.current = JSON.stringify(pendingDiscussion)
+        }
         setBackendState('synced')
       }).catch(() => setBackendState('offline'))
     }, 420)
     return () => window.clearTimeout(timer)
-  }, [applySnapshot, boardId, edges, hostedAccessToken, name, nodes, snapshotNow])
+  }, [applySnapshot, boardId, edges, hostedAccessToken, name, nodes, session, snapshotNow])
 
   useEffect(() => {
     if (!hostedAccessToken || !hostedReadyRef.current) return
@@ -1025,6 +1056,13 @@ function Workspace() {
         }
         setHostedRole(hosted.role)
         setHostedFocusClaims(hosted.focusClaims)
+        const incomingDiscussion = JSON.stringify(hosted.brainstorm ?? null)
+        if (JSON.stringify(sessionRef.current) === syncedDiscussionRef.current && incomingDiscussion !== syncedDiscussionRef.current) {
+          hostedPullRef.current = true
+          syncedDiscussionRef.current = incomingDiscussion
+          sessionRef.current = hosted.brainstorm ?? null
+          setSession(hosted.brainstorm ?? null)
+        }
         const localLastEvent = recordingRef.current?.events.at(-1)?.id
         const remoteLastEvent = hosted.session?.events.at(-1)?.id
         if (hosted.session && remoteLastEvent !== localLastEvent) {
@@ -1075,6 +1113,26 @@ function Workspace() {
     }, 320)
     return () => window.clearTimeout(timer)
   }, [edges, hostedAccessToken, name, nodes, recording, snapshotNow])
+
+  useEffect(() => {
+    if (!session || showCreation || hostedAccessToken) return
+    const timer = window.setTimeout(async () => {
+      const pending = sessionRef.current
+      if (!pending || pending.boardId !== boardIdRef.current) return
+      const serialized = JSON.stringify(pending)
+      setBackendState('syncing')
+      try {
+        await syncBrainstorm(pending, snapshotNow(), hostedAccessToken)
+        if (sessionRef.current?.id === pending.id) {
+          syncedDiscussionRef.current = serialized
+          setBackendState('synced')
+        }
+      } catch {
+        if (sessionRef.current?.id === pending.id) setBackendState('offline')
+      }
+    }, 320)
+    return () => window.clearTimeout(timer)
+  }, [boardId, edges, hostedAccessToken, name, nodes, session, showCreation, snapshotNow])
 
   useEffect(() => {
     const registration = registerWebMCP(actions, recordingActions, () => undefined)
@@ -1217,7 +1275,7 @@ function Workspace() {
 
   const newBoard = useCallback(() => {
     clearHostedAccess()
-    saveBoard(snapshotNow())
+    saveBrainstormBoard(snapshotNow(), sessionRef.current)
     const board = createEmptyBoard()
     applySnapshot(board)
     recordingRef.current = null
@@ -1226,7 +1284,7 @@ function Workspace() {
     historyRef.current = []
     futureRef.current = []
     setHistoryStatus({ canUndo: false, canRedo: false })
-    saveBoard(board)
+    saveBrainstormBoard(board, null)
     setBoardList(listBoards())
     reportActivity('New board', 'Started with an empty canvas', 'human')
     announce('New mural created')
@@ -1234,11 +1292,13 @@ function Workspace() {
 
   const switchBoard = useCallback((id: string) => {
     if (id === boardIdRef.current) return
-    saveBoard(snapshotNow())
+    saveBrainstormBoard(snapshotNow(), sessionRef.current)
     const board = loadBoardById(id)
     if (!board) return announce('That mural is no longer available')
     clearHostedAccess()
     applySnapshot(board)
+    sessionRef.current = loadBrainstorm(board)
+    setSession(sessionRef.current)
     const nextRecording = loadRecording(board.id)
     recordingRef.current = nextRecording
     setRecording(nextRecording)
@@ -1259,7 +1319,7 @@ function Workspace() {
   const handleBoardImport = useCallback(async (file: File) => {
     try {
       clearHostedAccess()
-      saveBoard(snapshotNow())
+      saveBrainstormBoard(snapshotNow(), sessionRef.current)
       const imported = importCanvasRelay(await file.text())
       const { board } = imported
       applySnapshot(board)
@@ -1454,9 +1514,10 @@ function Workspace() {
           memberId: createUUID(), createdAt: new Date().toISOString(),
         })
         applySnapshot(board)
-        saveBoard(board)
+        saveBrainstormBoard(board, next)
         setBoardList(listBoards())
         setSession(next)
+        sessionRef.current = next
         setShowCreation(false)
       }}>
         <h1>创建讨论</h1>

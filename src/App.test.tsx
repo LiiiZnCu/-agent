@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import App from './App'
 import { createEmptyBoard } from './lib/board'
 import { saveBoard } from './lib/storage'
+import type { BoardSnapshot, BrainstormSession } from './types'
 
 beforeEach(() => {
   cleanup()
@@ -29,6 +30,72 @@ describe('讨论入口', () => {
     render(<App />)
     expect(screen.getByRole('heading', { name: '创建讨论' })).toBeTruthy()
     expect(screen.queryByText('Walking stand-ups')).toBeNull()
+  })
+
+  it('离线刷新后恢复讨论修改、阶段、暂停状态和观点作者', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+    createDiscussion()
+    fireEvent.click(screen.getByRole('button', { name: 'Add evidence' }))
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: '成员写的资料' } })
+    fireEvent.click(screen.getByRole('button', { name: '协同优化' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: '暂停 AI' }))
+    await waitFor(() => expect(document.querySelector('.canvas-status')?.textContent).toContain('Saved locally'))
+    cleanup()
+    render(<App />)
+    expect(within(screen.getByRole('navigation', { name: '讨论阶段' })).getByText('社区花园')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '协同优化' }).getAttribute('aria-current')).toBe('step')
+    expect((screen.getByRole('checkbox', { name: '暂停 AI' }) as HTMLInputElement).checked).toBe(true)
+    expect(screen.getByText('成员写的资料')).toBeTruthy()
+    const id = localStorage.getItem('canvas-relay-current-board-v2')
+    const stored = JSON.parse(localStorage.getItem(`canvas-relay-board-v2:${id}`)!)
+    expect(stored.nodes[0].data.ideaMeta.authorId).toBe(stored.brainstormSession.currentMemberId)
+  })
+
+  it('切换到空白白板清空讨论，切换回来恢复本板讨论和编辑', async () => {
+    createDiscussion()
+    const discussionBoardId = localStorage.getItem('canvas-relay-current-board-v2')!
+    fireEvent.click(screen.getByRole('button', { name: '成果输出' }))
+    fireEvent.click(screen.getByRole('button', { name: 'New blank board' }))
+    expect(screen.queryByRole('navigation', { name: '讨论阶段' })).toBeNull()
+    const original = Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.includes('社区花园') && button.closest('.board-library-menu'))
+    expect(original).toBeTruthy()
+    fireEvent.click(original!)
+    expect(screen.getByRole('button', { name: '成果输出' }).getAttribute('aria-current')).toBe('step')
+    expect(localStorage.getItem('canvas-relay-current-board-v2')).toBe(discussionBoardId)
+  })
+
+  it('发布讨论时保留讨论内容并将副本绑定到托管白板', async () => {
+    const hostedId = '24aacdaa-53ec-4d20-b0ea-835dbb7c5f6c'
+    let savedDiscussion: { board: BoardSnapshot; session: BrainstormSession } | null = null
+    const writes: string[] = []
+    vi.stubGlobal('fetch', async (url: string, options?: RequestInit) => {
+      if (options?.method === 'PUT') writes.push(url)
+      const data = options?.body ? JSON.parse(options.body as string) : null
+      if (url === '/api/murals') return new Response(JSON.stringify({ board: { ...data.board, id: hostedId }, revision: 1, ownerToken: 'owner-token', userToken: 'user-token', ownerUrl: 'http://localhost/#owner', userUrl: 'http://localhost/#access' }))
+      if (url.startsWith('/api/brainstorm/')) {
+        savedDiscussion = data
+        return new Response(JSON.stringify({ ok: true, sessionId: data.session.id }))
+      }
+      if (options?.method === 'PUT') return new Response(JSON.stringify({ ok: true, board: data.board, revision: 2 }))
+      return new Response('{}')
+    })
+    createDiscussion()
+    const originalId = localStorage.getItem('canvas-relay-current-board-v2')!
+    fireEvent.click(screen.getByRole('button', { name: 'Add evidence' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Share' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Publish and create link' }))
+    await waitFor(() => expect((screen.getByLabelText('Collaborator URL') as HTMLInputElement).value).toContain('#access'))
+    expect(within(screen.getByRole('navigation', { name: '讨论阶段' })).getByText('社区花园')).toBeTruthy()
+    expect(savedDiscussion!.session.boardId).toBe(hostedId)
+    expect(savedDiscussion!.board.nodes[0].data.ideaMeta!.sessionId).toBe(savedDiscussion!.session.id)
+    const original = JSON.parse(localStorage.getItem(`canvas-relay-board-v2:${originalId}`)!)
+    expect(savedDiscussion!.session.id).not.toBe(original.brainstormSession.id)
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+    writes.length = 0
+    fireEvent.click(screen.getByRole('button', { name: 'Add risk' }))
+    await waitFor(() => expect(savedDiscussion!.board.nodes).toHaveLength(2))
+    expect(writes.findIndex((url) => url.startsWith('/api/murals/'))).toBeGreaterThanOrEqual(0)
+    expect(writes.findIndex((url) => url.startsWith('/api/murals/'))).toBeLessThan(writes.findIndex((url) => url.startsWith('/api/brainstorm/')))
   })
 
   it('成员填写任意主题后进入空白白板并可跳转阶段', () => {

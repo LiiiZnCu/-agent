@@ -33,6 +33,13 @@ describe('local mural library', () => {
     expect(listBoards()).toHaveLength(2)
   })
 
+  it('导入白板不会保留原讨论 ID 或观点的旧讨论身份', () => {
+    const imported = importBoard(JSON.stringify({ ...fallback, brainstormSessionId: 'old-discussion', brainstormSession: { id: 'old-discussion' }, nodes: [{ id: 'idea-a', position: { x: 0, y: 0 }, data: { title: '测试观点', body: '', kind: 'idea', color: 'paper', votes: 0, ideaMeta: { sessionId: 'old-discussion', authorId: 'old-member', type: 'evidence', sourceIdeaIds: [], versions: [], createdAt: fallback.createdAt } } }] }))
+    expect(imported.brainstormSessionId).toBeUndefined()
+    expect(imported.nodes[0].data.ideaMeta).toBeUndefined()
+    expect(JSON.parse(localStorage.getItem(`canvas-relay-board-v2:${imported.id}`)!).brainstormSession).toBeUndefined()
+  })
+
   it('rejects malformed nodes before they reach the renderer', () => {
     expect(() => importBoard(JSON.stringify({ ...fallback, nodes: [{}] }))).toThrow('not a valid')
   })
