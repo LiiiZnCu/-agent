@@ -3,11 +3,16 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { BoardSnapshot, RecordingSession } from '../src/types.ts'
-import { databasePath } from './db.ts'
+import { databasePath, db } from './db.ts'
+import { eq } from 'drizzle-orm'
+import { murals } from './schema.ts'
 import { toCsv, toMarkdown } from './export.ts'
 import { deleteSession, getSession, getSessionByBoardId, saveSession } from './store.ts'
 import { BrainstormWriteConflictError, getBrainstorm, getBrainstormByBoardId, saveBrainstorm } from './brainstorm-store.ts'
 import { validateBrainstormPayload, type StoredBrainstorm } from '../src/lib/brainstorm-validation.ts'
+import { isSnapshot } from '../src/lib/board-validation.ts'
+import { AgentValidationError, validateSuggestionRequest } from './agent-actions.ts'
+import { DeepSeekError, requestDeepSeekSuggestions } from './deepseek.ts'
 import { assertHostedWritable, authorizeHostedMural, createHostedInvites, createHostedMural, getHostedMural, redeemHostedInvite, rotateHostedUserShare, saveHostedMural, setHostedFocus, type HostedGuest } from './hosted.ts'
 
 export const app = express()
@@ -53,6 +58,41 @@ app.put('/api/brainstorm/:id', (request, response) => {
     throw error
   }
   return response.json({ ok: true, sessionId: payload.session.id, updatedAt: payload.board.updatedAt })
+})
+
+function suggestionContext(stored: StoredBrainstorm): StoredBrainstorm {
+  // 读取托管白板的当前内容，不使用会清理焦点记录的白板读取接口。
+  const mural = db.select({ boardJson: murals.boardJson }).from(murals).where(eq(murals.id, stored.board.id)).get()
+  const board: unknown = mural ? JSON.parse(mural.boardJson) : stored.board
+  if (!isSnapshot(board) || board.id !== stored.session.boardId) throw new AgentValidationError('当前讨论的白板数据无效。')
+  return { session: stored.session, board }
+}
+
+app.post('/api/brainstorm/:id/suggestions', async (request, response) => {
+  const stored = getBrainstorm(request.params.id)
+  if (!stored) return response.status(404).json({ error: '讨论不存在。' })
+  try { authorizeHostedMural(stored.board.id, bearer(request)) }
+  catch { return response.status(403).json({ error: '没有访问此讨论的权限。' }) }
+
+  const context = suggestionContext(stored)
+  let intent
+  try { intent = validateSuggestionRequest(request.body, context.board, stored.session) }
+  catch (error) { return response.status(400).json({ error: error instanceof Error ? error.message : '建议请求无效。' }) }
+  try {
+    const suggestion = await requestDeepSeekSuggestions(context, intent)
+    // 模型请求期间可能有人修改讨论或撤销访问能力，返回前再次检查。
+    try { authorizeHostedMural(stored.board.id, bearer(request)) }
+    catch { return response.status(403).json({ error: '没有访问此讨论的权限。' }) }
+    const current = getBrainstorm(request.params.id)
+    if (!current || JSON.stringify(suggestionContext(current)) !== JSON.stringify(context)) {
+      return response.status(409).json({ error: '讨论已变化，请重新请求建议。' })
+    }
+    return response.json(suggestion)
+  } catch (error) {
+    if (error instanceof DeepSeekError) return response.status(error.status).json({ error: error.message })
+    if (error instanceof AgentValidationError) return response.status(422).json({ error: error.message })
+    throw error
+  }
 })
 
 function bearer(request: express.Request) {
