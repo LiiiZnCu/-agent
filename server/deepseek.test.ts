@@ -191,6 +191,27 @@ describe('DeepSeek 服务端适配', () => {
     await expect(requestDeepSeekSuggestions({ board, session }, { purpose: '整理' })).rejects.toThrow('JSON')
   })
 
+  it('拒绝用数字属性对象冒充 choices 数组，即使内部是合法建议', async () => {
+    vi.stubEnv('DEEPSEEK_API_KEY', 'test-server-only-key')
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ choices: { 0: { message: { content: JSON.stringify(validResponse) } } } })))
+    const { requestDeepSeekSuggestions } = await import('./deepseek')
+    const { AgentValidationError } = await import('./agent-actions')
+    await expect(requestDeepSeekSuggestions({ board, session }, { purpose: '整理' })).rejects.toBeInstanceOf(AgentValidationError)
+  })
+
+  it.each([
+    null, [], {}, { choices: null }, { choices: [] }, { choices: [null] }, { choices: [[]] }, { choices: ['not-an-object'] },
+    { choices: [{}] }, { choices: [{ message: null }] }, { choices: [{ message: [] }] }, { choices: [{ message: 'not-an-object' }] },
+    { choices: [{ message: {} }] }, { choices: [{ message: { content: 1 } }] }, { choices: [{ message: { content: '' } }] },
+    { choices: [{ message: { content: '   ' } }] },
+  ])('拒绝缺失或错误类型的上游 JSON 结构：%j', async (envelope) => {
+    vi.stubEnv('DEEPSEEK_API_KEY', 'test-server-only-key')
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify(envelope)))
+    const { requestDeepSeekSuggestions } = await import('./deepseek')
+    const { AgentValidationError } = await import('./agent-actions')
+    await expect(requestDeepSeekSuggestions({ board, session }, { purpose: '整理' })).rejects.toBeInstanceOf(AgentValidationError)
+  })
+
   it.each(['', ' ', null, '{invalid', '```json\n{}\n```', '{}', '{"message":"说明"}', '{"message":"说明","actions":[]}',
     JSON.stringify({ message: '错误动作', actions: [{ type: 'delete_ideas' }] }),
     JSON.stringify({ message: '跨讨论动作', actions: [{ type: 'create_cluster', label: '分组', ideaIds: ['foreign-idea'] }] }),
