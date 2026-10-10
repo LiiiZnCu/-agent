@@ -166,6 +166,9 @@ function Workspace() {
   const hostedReadyRef = useRef(false)
   const hostedPullRef = useRef(false)
   const syncedDiscussionRef = useRef('')
+  const contentVersionRef = useRef(0)
+  const saveRequestRef = useRef(0)
+  const snapshotClockRef = useRef(Date.parse(initial.updatedAt))
   const [historyStatus, setHistoryStatus] = useState({ canUndo: false, canRedo: false })
 
   const reviseDiscussionNode = useCallback((node: BoardNode) => {
@@ -184,6 +187,7 @@ function Workspace() {
   useEffect(() => { boardIdRef.current = boardId }, [boardId])
   useEffect(() => { boardCreatedAtRef.current = boardCreatedAt }, [boardCreatedAt])
   useEffect(() => { recordingRef.current = recording }, [recording])
+  useEffect(() => { contentVersionRef.current += 1 }, [boardId, name, nodes, edges, session])
 
   useEffect(() => {
     if (!recording || recording.status !== 'recording') return
@@ -198,19 +202,23 @@ function Workspace() {
     window.history.replaceState({}, '', url)
   }, [boardId, showCreation])
 
-  const snapshotNow = useCallback((): BoardSnapshot => ({
-    id: boardIdRef.current,
-    brainstormSessionId: sessionRef.current?.id,
-    name: nameRef.current,
-    nodes: structuredClone(nodesRef.current.map(({ selected: _selected, dragging: _dragging, ...node }) => node)),
-    edges: structuredClone(edgesRef.current),
-    createdAt: boardCreatedAtRef.current,
-    updatedAt: new Date().toISOString(),
-    sync: {
-      nodeTombstones: structuredClone(nodeTombstonesRef.current),
-      edgeTombstones: structuredClone(edgeTombstonesRef.current),
-    },
-  }), [])
+  const snapshotNow = useCallback((): BoardSnapshot => {
+    // 同一毫秒内的连续快照也必须有严格递增的保存版本。
+    snapshotClockRef.current = Math.max(Date.now(), snapshotClockRef.current + 1)
+    return {
+      id: boardIdRef.current,
+      brainstormSessionId: sessionRef.current?.id,
+      name: nameRef.current,
+      nodes: structuredClone(nodesRef.current.map(({ selected: _selected, dragging: _dragging, ...node }) => node)),
+      edges: structuredClone(edgesRef.current),
+      createdAt: boardCreatedAtRef.current,
+      updatedAt: new Date(snapshotClockRef.current).toISOString(),
+      sync: {
+        nodeTombstones: structuredClone(nodeTombstonesRef.current),
+        edgeTombstones: structuredClone(edgeTombstonesRef.current),
+      },
+    }
+  }, [])
 
   useEffect(() => {
     if (!('BroadcastChannel' in window)) return
@@ -348,6 +356,7 @@ function Workspace() {
 
   const applySnapshot = useCallback((snapshot: BoardSnapshot, preserveSelection = false) => {
     const copy = copySnapshot(snapshot)
+    snapshotClockRef.current = Math.max(snapshotClockRef.current, Date.parse(copy.updatedAt))
     if (copy.sync) {
       nodeTombstonesRef.current = { ...nodeTombstonesRef.current, ...copy.sync.nodeTombstones }
       edgeTombstonesRef.current = { ...edgeTombstonesRef.current, ...copy.sync.edgeTombstones }
@@ -989,8 +998,9 @@ function Workspace() {
     const requestedId = new URLSearchParams(window.location.search).get('mural')
     if (!requestedId || !hostedAccessToken || hostedReadyRef.current && requestedId === boardIdRef.current) return
     let active = true
+    const requestedVersion = contentVersionRef.current
     loadHostedMural(requestedId, hostedAccessToken).then((hosted) => {
-      if (!active) return
+      if (!active || requestedId !== boardIdRef.current || requestedVersion !== contentVersionRef.current || hosted.board.id !== requestedId) return
       hostedRevisionRef.current = hosted.revision
       hostedReadyRef.current = true
       hostedPullRef.current = true
@@ -1020,21 +1030,29 @@ function Workspace() {
     const timer = window.setTimeout(() => {
       const pending = snapshotNow()
       const pendingDiscussion = structuredClone(sessionRef.current)
+      const sentVersion = contentVersionRef.current
+      const sentRevision = hostedRevisionRef.current
+      const requestId = ++saveRequestRef.current
+      const current = () => boardIdRef.current === pending.id && contentVersionRef.current === sentVersion && saveRequestRef.current === requestId && hostedRevisionRef.current === sentRevision
+      setBackendState('syncing')
       saveHostedMural(pending, hostedAccessToken).then(async (saved) => {
-        hostedRevisionRef.current = saved.revision
+        if (!current()) return
+        if (saved.board.id !== pending.id || !Number.isSafeInteger(saved.revision) || saved.revision <= sentRevision) throw new Error('托管保存回执无效。')
         const canonicalChanged = saved.board.name !== pending.name
           || JSON.stringify(saved.board.nodes) !== JSON.stringify(pending.nodes)
           || JSON.stringify(saved.board.edges) !== JSON.stringify(pending.edges)
+        if (pendingDiscussion) {
+          await syncBrainstorm(pendingDiscussion, { ...saved.board, updatedAt: pending.updatedAt }, hostedAccessToken)
+        }
+        if (!current()) return
+        hostedRevisionRef.current = saved.revision
+        if (pendingDiscussion) syncedDiscussionRef.current = JSON.stringify(pendingDiscussion)
         if (canonicalChanged) {
           hostedPullRef.current = true
           applySnapshot(saved.board, true)
         }
-        if (pendingDiscussion && sessionRef.current?.id === pendingDiscussion.id) {
-          await syncBrainstorm(pendingDiscussion, saved.board, hostedAccessToken)
-          syncedDiscussionRef.current = JSON.stringify(pendingDiscussion)
-        }
         setBackendState('synced')
-      }).catch(() => setBackendState('offline'))
+      }).catch(() => { if (current()) setBackendState('offline') })
     }, 420)
     return () => window.clearTimeout(timer)
   }, [applySnapshot, boardId, edges, hostedAccessToken, name, nodes, session, snapshotNow])
@@ -1047,8 +1065,11 @@ function Workspace() {
       if (busy) return
       busy = true
       try {
-        const hosted = await loadHostedMural(boardIdRef.current, hostedAccessToken)
-        if (!active) return
+        const requestedId = boardIdRef.current
+        const requestedVersion = contentVersionRef.current
+        const requestedRevision = hostedRevisionRef.current
+        const hosted = await loadHostedMural(requestedId, hostedAccessToken)
+        if (!active || requestedId !== boardIdRef.current || requestedVersion !== contentVersionRef.current || requestedRevision !== hostedRevisionRef.current || hosted.board.id !== requestedId) return
         if (hosted.revision > hostedRevisionRef.current) {
           hostedRevisionRef.current = hosted.revision
           hostedPullRef.current = true
@@ -1120,15 +1141,19 @@ function Workspace() {
       const pending = sessionRef.current
       if (!pending || pending.boardId !== boardIdRef.current) return
       const serialized = JSON.stringify(pending)
+      const board = snapshotNow()
+      const sentVersion = contentVersionRef.current
+      const requestId = ++saveRequestRef.current
+      const current = () => boardIdRef.current === board.id && contentVersionRef.current === sentVersion && saveRequestRef.current === requestId && JSON.stringify(sessionRef.current) === serialized
       setBackendState('syncing')
       try {
-        await syncBrainstorm(pending, snapshotNow(), hostedAccessToken)
-        if (sessionRef.current?.id === pending.id) {
+        await syncBrainstorm(pending, board, hostedAccessToken)
+        if (current()) {
           syncedDiscussionRef.current = serialized
           setBackendState('synced')
         }
       } catch {
-        if (sessionRef.current?.id === pending.id) setBackendState('offline')
+        if (current()) setBackendState('offline')
       }
     }, 320)
     return () => window.clearTimeout(timer)

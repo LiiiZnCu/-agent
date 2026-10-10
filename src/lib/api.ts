@@ -35,10 +35,12 @@ export async function syncRecording(session: RecordingSession, finalBoard: Board
 
 export async function syncBrainstorm(session: BrainstormSession, board: BoardSnapshot, accessToken = '') {
   const payload = validateBrainstormPayload({ session, board })
-  return jsonResponse<{ ok: true; sessionId: string }>(await fetch(`/api/brainstorm/${encodeURIComponent(session.id)}`, {
+  const saved = await jsonResponse<{ ok: true; sessionId: string; updatedAt: string }>(await fetch(`/api/brainstorm/${encodeURIComponent(session.id)}`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
     body: JSON.stringify(payload),
   }))
+  if (saved?.ok !== true || saved.sessionId !== session.id || saved.updatedAt !== board.updatedAt) throw new Error('讨论保存回执与当前版本不匹配。')
+  return saved
 }
 
 export async function loadBrainstormSession(id: string, accessToken = '') {

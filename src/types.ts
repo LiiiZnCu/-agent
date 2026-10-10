@@ -71,7 +71,7 @@ export type AgentSuggestion = { id: string; trigger: 'manual' | 'stage' | 'board
 export type Proposal = { id: string; title: string; description: string; sourceIdeaIds: string[]; authorId: string; integrationLogic: string; risks: string[]; openQuestions: string[]; status: 'draft' | 'accepted' | 'rejected'; comments: Array<{ id: string; authorId: string; kind: 'support' | 'oppose' | 'supplement' | 'risk' | 'verify'; content: string; createdAt: string }> }
 export type DecisionMatrix = { criteria: Array<{ id: string; name: string; weight: number }>; scores: Array<{ proposalId: string; criterionId: string; memberId: string; score: number; reason: string }>; votes: Array<{ proposalId: string; memberId: string }>; finalProposalId?: string; confirmedBy?: string; confirmedAt?: string }
 export type Outcome = { draft: string; finalProposalId?: string; actions: Array<{ title: string; ownerId?: string; dueAt?: string }>; updatedAt: string }
-export type BrainstormSession = { id: string; boardId: string; topic: string; goal: string; background: string; constraints: string; stage: BrainstormStage; aiPaused?: boolean; currentMemberId: string; members: BrainstormMember[]; suggestions: AgentSuggestion[]; proposals: Proposal[]; decision: DecisionMatrix | null; outcome: Outcome | null; createdAt: string; updatedAt: string }
+export type BrainstormSession = { id: string; boardId: string; topic: string; goal: string; background: string; constraints: string; stage: BrainstormStage; aiPaused: boolean; currentMemberId: string; members: BrainstormMember[]; suggestions: AgentSuggestion[]; proposals: Proposal[]; decision: DecisionMatrix | null; outcome: Outcome | null; createdAt: string; updatedAt: string }
 
 export type Activity = {
   id: string

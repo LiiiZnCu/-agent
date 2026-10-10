@@ -1,4 +1,4 @@
-import type { BoardSnapshot, BrainstormSession } from '../types'
+import type { AgentSuggestion, BoardSnapshot, BrainstormSession } from '../types'
 import { isSnapshot } from './board-validation'
 export type StoredBrainstorm = { board: BoardSnapshot; session: BrainstormSession }
 
@@ -14,6 +14,7 @@ function list(value: unknown, check: (item: unknown) => boolean): value is unkno
 function strings(value: unknown): boolean { return list(value, text) }
 function optional(value: unknown, check: (item: unknown) => boolean): boolean { return value === undefined || check(value) }
 function finite(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value) }
+function enumeration(value: unknown, values: string[]): value is string { return typeof value === 'string' && values.includes(value) }
 function uniqueRecords(value: unknown, check: (item: RecordValue) => boolean): value is RecordValue[] {
   if (!list(value, (item) => record(item) && id(item.id) && check(item))) return false
   return new Set(value.map((item) => (item as RecordValue).id)).size === value.length
@@ -24,9 +25,40 @@ function validIdeaMetadata(board: BoardSnapshot, session: RecordValue, memberIds
   return board.nodes.every((node) => {
     const meta = node.data.ideaMeta
     return meta === undefined || (record(meta) && meta.sessionId === session.id && memberIds.has(meta.authorId)
-      && ideaTypes.includes(String(meta.type)) && date(meta.createdAt) && list(meta.sourceIdeaIds, (source) => id(source) && nodeIds.has(source))
+      && enumeration(meta.type, ideaTypes) && date(meta.createdAt) && list(meta.sourceIdeaIds, (source) => id(source) && nodeIds.has(source))
       && list(meta.versions, (version) => record(version) && memberIds.has(version.authorId) && date(version.createdAt)))
   })
+}
+
+// 动作只接受固定字段和当前讨论的真实观点引用，供保存及后续建议入口共用。
+export function validateBrainstormAction(value: unknown, board: BoardSnapshot, sessionId: string): AgentSuggestion['actions'][number] {
+  const invalid = () => { throw new Error('建议动作结构或观点引用无效。') }
+  if (!record(value) || !enumeration(value.type, actionTypes)) return invalid()
+  const type = value.type
+  const references = (ids: unknown, minimum: number) => list(ids, (item) => id(item) && board.nodes.some((node) => node.id === item && node.data.ideaMeta?.sessionId === sessionId))
+    && ids.length >= minimum && new Set(ids).size === ids.length
+  const fields: Record<string, string[]> = {
+    create_cluster: ['type', 'label', 'ideaIds'], connect_ideas: ['type', 'fromId', 'toId', 'label'], ask_question: ['type', 'question'],
+    suggest_merge: ['type', 'ideaIds', 'title', 'content', 'logic', 'risks', 'openQuestions'], create_matrix: ['type', 'title', 'criteria'], create_summary: ['type', 'summary'],
+  }
+  if (Object.keys(value).length !== fields[type].length || Object.keys(value).some((key) => !fields[type].includes(key))) return invalid()
+  let valid = false
+  switch (value.type) {
+    case 'create_cluster': valid = text(value.label, false) && references(value.ideaIds, 1); break
+    case 'connect_ideas': valid = text(value.label, false) && value.fromId !== value.toId && references([value.fromId, value.toId], 2); break
+    case 'ask_question': valid = text(value.question, false); break
+    case 'suggest_merge': valid = references(value.ideaIds, 2) && text(value.title, false) && text(value.content, false) && text(value.logic, false) && strings(value.risks) && strings(value.openQuestions); break
+    case 'create_matrix': valid = text(value.title, false) && list(value.criteria, (criterion) => text(criterion, false)) && value.criteria.length > 0; break
+    case 'create_summary': valid = text(value.summary, false); break
+  }
+  if (!valid) return invalid()
+  return structuredClone(value) as AgentSuggestion['actions'][number]
+}
+
+function validActions(value: unknown, board: BoardSnapshot, sessionId: string): boolean {
+  return list(value, (action) => {
+    try { validateBrainstormAction(action, board, sessionId); return true } catch { return false }
+  }) && value.length > 0
 }
 
 // 前后端共用同一套结构检查，不为损坏数据补字段或猜测内容。
@@ -37,24 +69,25 @@ export function validateBrainstormPayload(value: unknown, expectedId?: string): 
   if (!id(session.id) || (expectedId !== undefined && session.id !== expectedId) || session.boardId !== board.id
     || (board.brainstormSessionId !== undefined && board.brainstormSessionId !== session.id)
     || !text(session.topic, false) || !text(session.goal, false) || !text(session.background) || !text(session.constraints)
-    || !stages.includes(String(session.stage)) || !optional(session.aiPaused, (paused) => typeof paused === 'boolean')
+    || !enumeration(session.stage, stages) || typeof session.aiPaused !== 'boolean'
     || !date(session.createdAt) || !date(session.updatedAt)
-    || !uniqueRecords(session.members, (member) => text(member.name, false) && ['facilitator', 'member'].includes(String(member.role)) && date(member.joinedAt))
+    || !uniqueRecords(session.members, (member) => text(member.name, false) && enumeration(member.role, ['facilitator', 'member']) && date(member.joinedAt))
     || !session.members.length) return invalid()
   const memberIds = new Set(session.members.map((member) => member.id))
   if (!memberIds.has(session.currentMemberId) || !validIdeaMetadata(board, session, memberIds)) return invalid()
   const nodeIds = new Set(board.nodes.map((node) => node.id))
   if (!uniqueRecords(session.proposals, (proposal) => text(proposal.title) && text(proposal.description) && text(proposal.integrationLogic)
     && memberIds.has(proposal.authorId) && list(proposal.sourceIdeaIds, (source) => id(source) && nodeIds.has(source))
-    && strings(proposal.risks) && strings(proposal.openQuestions) && ['draft', 'accepted', 'rejected'].includes(String(proposal.status))
-    && uniqueRecords(proposal.comments, (comment) => memberIds.has(comment.authorId) && ['support', 'oppose', 'supplement', 'risk', 'verify'].includes(String(comment.kind)) && text(comment.content) && date(comment.createdAt)))) return invalid()
+    && strings(proposal.risks) && strings(proposal.openQuestions) && enumeration(proposal.status, ['draft', 'accepted', 'rejected'])
+    && uniqueRecords(proposal.comments, (comment) => memberIds.has(comment.authorId) && enumeration(comment.kind, ['support', 'oppose', 'supplement', 'risk', 'verify']) && text(comment.content) && date(comment.createdAt)))) return invalid()
   const proposalIds = new Set(session.proposals.map((proposal) => proposal.id))
-  if (!uniqueRecords(session.suggestions, (suggestion) => ['manual', 'stage', 'board_change'].includes(String(suggestion.trigger))
-    && text(suggestion.message) && ['pending', 'accepted', 'rejected', 'ignored'].includes(String(suggestion.status))
-    && list(suggestion.actions, (action) => record(action) && actionTypes.includes(String(action.type)))
-    && list(suggestion.ignoredActionTypes, (type) => actionTypes.includes(String(type)))
+  if (!uniqueRecords(session.suggestions, (suggestion) => enumeration(suggestion.trigger, ['manual', 'stage', 'board_change'])
+    && text(suggestion.message) && enumeration(suggestion.status, ['pending', 'accepted', 'rejected', 'ignored'])
+    && optional(suggestion.boardBeforeAccept, (snapshot) => isSnapshot(snapshot) && snapshot.id === board.id && validIdeaMetadata(snapshot, session, memberIds))
+    && validActions(suggestion.actions, (suggestion.boardBeforeAccept as BoardSnapshot | undefined) ?? board, session.id as string)
+    && list(suggestion.ignoredActionTypes, (type) => enumeration(type, actionTypes))
     && typeof suggestion.pausedForStage === 'boolean' && date(suggestion.createdAt)
-    && optional(suggestion.boardBeforeAccept, (snapshot) => isSnapshot(snapshot) && snapshot.id === board.id && validIdeaMetadata(snapshot, session, memberIds)))) return invalid()
+  )) return invalid()
   const decision = session.decision
   if (decision !== null) {
     if (!record(decision) || !uniqueRecords(decision.criteria, (criterion) => text(criterion.name) && finite(criterion.weight) && criterion.weight >= 0)) return invalid()

@@ -22,7 +22,7 @@ export function createBrainstormSession(input: { id: string; boardId: string; to
   return {
     id: input.id, boardId: input.boardId, topic, goal,
     background: input.background?.trim() ?? '', constraints: input.constraints?.trim() ?? '',
-    stage: 'collecting', currentMemberId: input.memberId,
+    stage: 'collecting', aiPaused: false, currentMemberId: input.memberId,
     members: [{ id: input.memberId, name: memberName, role: 'facilitator', joinedAt: input.createdAt }],
     suggestions: [], proposals: [], decision: null, outcome: null,
     createdAt: input.createdAt, updatedAt: input.createdAt,

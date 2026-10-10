@@ -48,7 +48,7 @@ export function isSnapshot(value: unknown): value is BoardSnapshot {
       || typeof data.votes !== 'number' || !Number.isFinite(data.votes) || data.votes < 0
       || !isOptionalString(data.cluster, 1_000)
       || (data.justCreated !== undefined && typeof data.justCreated !== 'boolean')) return false
-    if (!validKinds.has(String(data.kind)) || !validColors.has(String(data.color))) return false
+    if (typeof data.kind !== 'string' || !validKinds.has(data.kind) || typeof data.color !== 'string' || !validColors.has(data.color)) return false
     if (node.type !== undefined && node.type !== 'boardElement') return false
     if (node.zIndex !== undefined && (typeof node.zIndex !== 'number' || !Number.isFinite(node.zIndex))) return false
     if (data.kind === 'artifact') return hasValidArtifact(data.artifact)

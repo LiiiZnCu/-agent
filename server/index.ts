@@ -6,7 +6,7 @@ import type { BoardSnapshot, RecordingSession } from '../src/types.ts'
 import { databasePath } from './db.ts'
 import { toCsv, toMarkdown } from './export.ts'
 import { deleteSession, getSession, getSessionByBoardId, saveSession } from './store.ts'
-import { getBrainstorm, getBrainstormByBoardId, saveBrainstorm } from './brainstorm-store.ts'
+import { BrainstormWriteConflictError, getBrainstorm, getBrainstormByBoardId, saveBrainstorm } from './brainstorm-store.ts'
 import { validateBrainstormPayload, type StoredBrainstorm } from '../src/lib/brainstorm-validation.ts'
 import { assertHostedWritable, authorizeHostedMural, createHostedInvites, createHostedMural, getHostedMural, redeemHostedInvite, rotateHostedUserShare, saveHostedMural, setHostedFocus, type HostedGuest } from './hosted.ts'
 
@@ -46,8 +46,13 @@ app.put('/api/brainstorm/:id', (request, response) => {
   } catch {
     return response.status(403).json({ error: '没有保存此讨论的权限。' })
   }
-  saveBrainstorm(payload)
-  return response.json({ ok: true, sessionId: payload.session.id })
+  try {
+    saveBrainstorm(payload)
+  } catch (error) {
+    if (error instanceof BrainstormWriteConflictError) return response.status(409).json({ error: error.message })
+    throw error
+  }
+  return response.json({ ok: true, sessionId: payload.session.id, updatedAt: payload.board.updatedAt })
 })
 
 function bearer(request: express.Request) {

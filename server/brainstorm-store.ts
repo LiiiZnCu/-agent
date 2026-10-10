@@ -3,12 +3,21 @@ import { desc, eq } from 'drizzle-orm'
 import { db } from './db.ts'
 import { brainstormSessions } from './schema.ts'
 
+export class BrainstormWriteConflictError extends Error {}
+
 export function saveBrainstorm(input: StoredBrainstorm) {
   const payload = validateBrainstormPayload(input)
-  const existing = getBrainstorm(payload.session.id)
-  if (existing && existing.board.id !== payload.board.id) throw new Error('讨论不能迁移到另一个白板。')
-  const values = { id: payload.session.id, boardId: payload.board.id, payloadJson: JSON.stringify(payload), updatedAt: new Date().toISOString() }
-  db.insert(brainstormSessions).values(values).onConflictDoUpdate({ target: brainstormSessions.id, set: values }).run()
+  db.transaction((tx) => {
+    const existing = getBrainstorm(payload.session.id)
+    if (existing && existing.board.id !== payload.board.id) throw new BrainstormWriteConflictError('讨论不能迁移到另一个白板。')
+    const serialized = JSON.stringify(payload)
+    if (existing && Date.parse(payload.board.updatedAt) <= Date.parse(existing.board.updatedAt)) {
+      if (Date.parse(payload.board.updatedAt) === Date.parse(existing.board.updatedAt) && serialized === JSON.stringify(existing)) return
+      throw new BrainstormWriteConflictError('该保存版本已过期，请读取最新讨论。')
+    }
+    const values = { id: payload.session.id, boardId: payload.board.id, payloadJson: serialized, updatedAt: new Date(payload.board.updatedAt).toISOString() }
+    tx.insert(brainstormSessions).values(values).onConflictDoUpdate({ target: brainstormSessions.id, set: values }).run()
+  })
 }
 
 export function getBrainstorm(id: string): StoredBrainstorm | null {

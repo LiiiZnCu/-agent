@@ -68,15 +68,16 @@ describe('讨论入口', () => {
     const hostedId = '24aacdaa-53ec-4d20-b0ea-835dbb7c5f6c'
     let savedDiscussion: { board: BoardSnapshot; session: BrainstormSession } | null = null
     const writes: string[] = []
+    let serverRevision = 1
     vi.stubGlobal('fetch', async (url: string, options?: RequestInit) => {
       if (options?.method === 'PUT') writes.push(url)
       const data = options?.body ? JSON.parse(options.body as string) : null
       if (url === '/api/murals') return new Response(JSON.stringify({ board: { ...data.board, id: hostedId }, revision: 1, ownerToken: 'owner-token', userToken: 'user-token', ownerUrl: 'http://localhost/#owner', userUrl: 'http://localhost/#access' }))
       if (url.startsWith('/api/brainstorm/')) {
         savedDiscussion = data
-        return new Response(JSON.stringify({ ok: true, sessionId: data.session.id }))
+        return new Response(JSON.stringify({ ok: true, sessionId: data.session.id, updatedAt: data.board.updatedAt }))
       }
-      if (options?.method === 'PUT') return new Response(JSON.stringify({ ok: true, board: data.board, revision: 2 }))
+      if (options?.method === 'PUT') return new Response(JSON.stringify({ ok: true, board: data.board, revision: ++serverRevision }))
       return new Response('{}')
     })
     createDiscussion()

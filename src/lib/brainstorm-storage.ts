@@ -14,5 +14,6 @@ export function saveBrainstormBoard(board: BoardSnapshot, session: BrainstormSes
 export function loadBrainstorm(board: BoardSnapshot): BrainstormSession | null {
   const stored = board as BoardSnapshot & { brainstormSession?: unknown }
   if (stored.brainstormSession == null && stored.brainstormSessionId === undefined) return null
+  if (typeof stored.brainstormSessionId !== 'string' || !stored.brainstormSessionId.trim()) throw new Error('本地快照缺少讨论 ID。')
   return validateBrainstormPayload({ board, session: stored.brainstormSession }, stored.brainstormSessionId).session
 }

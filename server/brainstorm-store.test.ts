@@ -36,7 +36,7 @@ describe('独立 SQLite 讨论存储', () => {
     const schema = await import('./schema')
     store.saveBrainstorm({ session, board })
     expect(store.getBrainstorm(session.id)).toEqual({ session, board })
-    store.saveBrainstorm({ session: { ...session, topic: '修改后的主题', aiPaused: false }, board })
+    store.saveBrainstorm({ session: { ...session, topic: '修改后的主题', aiPaused: false }, board: { ...board, updatedAt: '2026-10-10T10:00:01.000Z' } })
     expect(store.getBrainstorm(session.id)?.session.topic).toBe('修改后的主题')
     expect(store.getBrainstorm(session.id)?.session.aiPaused).toBe(false)
     expect(db.select().from(schema.sessions).all()).toHaveLength(0)
@@ -63,7 +63,7 @@ describe('独立 SQLite 讨论存储', () => {
     expect((await request(payload.session.id)).status).toBe(403)
     expect((await request(payload.session.id, undefined, 'wrong-token')).status).toBe(403)
     expect((await request(payload.session.id, undefined, mural.userToken)).status).toBe(200)
-    expect((await request(payload.session.id, { ...payload, session: { ...payload.session, topic: '修改' } }, mural.userToken)).status).toBe(200)
+    expect((await request(payload.session.id, { ...payload, board: { ...payload.board, updatedAt: new Date(Date.parse(payload.board.updatedAt) + 1).toISOString() }, session: { ...payload.session, topic: '修改' } }, mural.userToken)).status).toBe(200)
     const opened = await fetch(`${base}/api/murals/${mural.board.id}`, { headers: { Authorization: `Bearer ${mural.userToken}` } })
     expect((await opened.json() as { brainstorm: BrainstormSession }).brainstorm.topic).toBe('修改')
   })
@@ -74,5 +74,14 @@ describe('独立 SQLite 讨论存储', () => {
       expect((await request('failed-save', { session: { ...session, id: 'failed-save' }, board })).status).toBe(500)
       expect(db.select().from(schema.brainstormSessions).where((await import('drizzle-orm')).eq(schema.brainstormSessions.id, 'failed-save')).get()).toBeUndefined()
     } finally { db.run('PRAGMA query_only = OFF') }
+  })
+  it('先收到新保存 B 后拒绝旧保存 A，不覆盖新数据', async () => {
+    const newerBoard = { ...board, updatedAt: '2026-10-10T10:00:02.000Z' }
+    const newerSession = { ...session, id: 'ordered-discussion', topic: '新保存 B' }
+    expect((await request(newerSession.id, { board: newerBoard, session: newerSession })).status).toBe(200)
+    expect((await request(newerSession.id, { board, session: { ...newerSession, topic: '旧保存 A' } })).status).toBe(409)
+    expect(store.getBrainstorm(newerSession.id)?.session.topic).toBe('新保存 B')
+    expect((await request(newerSession.id, { board: newerBoard, session: { ...newerSession, topic: '同版本的其他内容' } })).status).toBe(409)
+    expect((await request(newerSession.id, { board: newerBoard, session: newerSession })).status).toBe(200)
   })
 })

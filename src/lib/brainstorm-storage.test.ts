@@ -38,7 +38,7 @@ describe('讨论持久化', () => {
   it('保留旧补充类型、建议确认前快照和编辑中的空文本', () => {
     const board = structuredClone(boardFixture)
     board.nodes[0].data.ideaMeta!.type = 'supplement'
-    const session: BrainstormSession = { ...structuredClone(sessionFixture), proposals: [{ ...sessionFixture.proposals[0], risks: [''] }], suggestions: [{ id: 'suggestion-a', trigger: 'manual', message: '测试建议', actions: [{ type: 'create_summary', title: '测试标题', draft: '测试草稿' }], status: 'accepted', ignoredActionTypes: ['ask_question'], pausedForStage: true, boardBeforeAccept: board, createdAt: sessionFixture.createdAt }] }
+    const session: BrainstormSession = { ...structuredClone(sessionFixture), proposals: [{ ...sessionFixture.proposals[0], risks: [''] }], suggestions: [{ id: 'suggestion-a', trigger: 'manual', message: '测试建议', actions: [{ type: 'create_summary', summary: '测试草稿' }], status: 'accepted', ignoredActionTypes: ['ask_question'], pausedForStage: true, boardBeforeAccept: board, createdAt: sessionFixture.createdAt }] }
     storage.saveBrainstormBoard(board, session)
     expect(storage.loadBrainstorm(loadBoardById(board.id)!)).toEqual(session)
   })
@@ -60,6 +60,69 @@ describe('讨论持久化', () => {
     const board = structuredClone(boardFixture)
     board.nodes[0].data.ideaMeta!.type = 'invalid' as never
     expect(() => storage.validateBrainstormPayload({ session: sessionFixture, board })).toThrow()
+  })
+  it('有完整讨论却缺少或错配快照讨论 ID 时拒绝恢复', () => {
+    expect(() => storage.loadBrainstorm({ ...boardFixture, brainstormSession: sessionFixture } as BoardSnapshot)).toThrow()
+    expect(() => storage.loadBrainstorm({ ...boardFixture, brainstormSessionId: 'other-session', brainstormSession: sessionFixture } as BoardSnapshot)).toThrow()
+  })
+  it.each([
+    { ...sessionFixture, stage: ['collecting'] },
+    { ...sessionFixture, aiPaused: undefined },
+    { ...sessionFixture, members: [{ ...sessionFixture.members[0], role: ['facilitator'] }] },
+    { ...sessionFixture, proposals: [{ ...sessionFixture.proposals[0], status: ['accepted'] }] },
+    { ...sessionFixture, proposals: [{ ...sessionFixture.proposals[0], comments: [{ ...sessionFixture.proposals[0].comments[0], kind: ['support'] }] }] },
+  ])('拒绝枚举强制转换及缺失的暂停字段 %#', (session) => {
+    expect(() => storage.validateBrainstormPayload({ board: boardFixture, session })).toThrow()
+  })
+  it('观点类型必须是字符串，不能是可转换的数组', () => {
+    const board = structuredClone(boardFixture)
+    board.nodes[0].data.ideaMeta!.type = ['evidence'] as never
+    expect(() => storage.validateBrainstormPayload({ board, session: sessionFixture })).toThrow()
+  })
+  it('白板节点枚举也不能以数组冒充字符串', () => {
+    const board = structuredClone(boardFixture)
+    board.nodes[0].data.kind = ['idea'] as never
+    expect(() => storage.validateBrainstormPayload({ board, session: sessionFixture })).toThrow()
+  })
+  const validActions = [
+    { type: 'create_cluster', label: '测试分类', ideaIds: ['idea-a'] },
+    { type: 'connect_ideas', fromId: 'idea-a', toId: 'proposal-a', label: '测试关系' },
+    { type: 'ask_question', question: '测试问题' },
+    { type: 'suggest_merge', ideaIds: ['idea-a', 'proposal-a'], title: '测试方案', content: '测试内容', logic: '测试逻辑', risks: [], openQuestions: [] },
+    { type: 'create_matrix', title: '测试比较', criteria: ['测试标准'] },
+    { type: 'create_summary', summary: '测试总结' },
+  ]
+  function withAction(action: unknown) {
+    return { ...sessionFixture, suggestions: [{ id: 'suggestion-a', trigger: 'manual', message: '测试建议', actions: [action], status: 'pending', ignoredActionTypes: [], pausedForStage: false, createdAt: sessionFixture.createdAt }] }
+  }
+  it.each(validActions)('接受完整的 $type 动作', (action) => {
+    expect(storage.validateBrainstormPayload({ board: boardFixture, session: withAction(action) }).session.suggestions[0].actions).toEqual([action])
+  })
+  it.each(validActions)('拒绝 $type 的缺失字段', (action) => {
+    expect(() => storage.validateBrainstormPayload({ board: boardFixture, session: withAction({ type: action.type }) })).toThrow()
+  })
+  it.each([
+    { ...validActions[0], type: ['create_cluster'] },
+    { ...validActions[0], label: ['分类'] },
+    { ...validActions[0], ideaIds: ['missing-idea'] },
+    { ...validActions[0], ideaIds: [['idea-a']] },
+    { ...validActions[0], ideaIds: ['idea-a', 'idea-a'] },
+    { ...validActions[1], toId: 'idea-a' },
+    { ...validActions[1], fromId: 'missing-idea' },
+    { ...validActions[2], question: {} },
+    { ...validActions[3], ideaIds: ['idea-a'] },
+    { ...validActions[3], risks: [4] },
+    { ...validActions[4], criteria: [] },
+    { ...validActions[4], criteria: [['标准']] },
+    { ...validActions[5], summary: '' },
+    { ...validActions[5], unexpected: '未知字段' },
+  ])('拒绝动作错误类型、结构或引用 %#', (action) => {
+    expect(() => storage.validateBrainstormPayload({ board: boardFixture, session: withAction(action) })).toThrow()
+  })
+  it('动作不能引用没有当前讨论身份的节点', () => {
+    const board = structuredClone(boardFixture)
+    delete board.nodes[0].data.ideaMeta
+    expect(() => storage.validateBrainstormPayload({ board, session: withAction(validActions[0]) })).toThrow()
   })
   it('不补全损坏的本地讨论，也不吞掉本地写入失败', () => {
     expect(() => storage.loadBrainstorm({ ...boardFixture, brainstormSessionId: 'discussion-a', brainstormSession: { id: 'discussion-a' } } as BoardSnapshot)).toThrow()
