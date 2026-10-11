@@ -5,13 +5,18 @@ import { dirname, join, resolve } from 'node:path'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createServer } from 'node:net'
 
-it('按生产镜像命令启动服务并通过健康检查', async () => {
+it('按生产镜像命令启动服务并提供健康检查和首页', async () => {
   const root = resolve(import.meta.dirname, '..')
   const runtime = mkdtempSync(join(tmpdir(), 'mural-runtime-layout-'))
   const dockerfile = readFileSync(join(root, 'Dockerfile'), 'utf8')
   let child: ChildProcessWithoutNullStreams | undefined
   try {
     for (const line of dockerfile.split('\n')) {
+      const built = /^COPY --from=build \/app\/dist (\S+)$/.exec(line.trim())
+      if (built) {
+        cpSync(join(root, 'dist'), join(runtime, built[1]), { recursive: true })
+        continue
+      }
       const match = /^COPY (?!--from=)(\S+) (\S+)$/.exec(line.trim())
       if (!match || !match[1].startsWith('server') && !match[1].startsWith('src/')) continue
       const destination = join(runtime, match[2])
@@ -48,6 +53,10 @@ it('按生产镜像命令启动服务并通过健康检查', async () => {
     const health = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(2000) })
     expect(health.status).toBe(200)
     expect(await health.json()).toEqual({ ok: true, storage: 'drizzle-sqlite', databasePath: join(runtime, 'data.sqlite') })
+    const page = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(2000) })
+    expect(page.status).toBe(200)
+    expect(page.headers.get('content-type')).toContain('text/html')
+    expect(await page.text()).toContain('<div id="root"></div>')
   } finally {
     if (child && child.exitCode === null && child.signalCode === null) {
       await new Promise<void>((resolve) => {
