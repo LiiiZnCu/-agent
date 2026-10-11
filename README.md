@@ -1,244 +1,139 @@
-# Canvas Relay
+# AI-Mural
 
-Canvas Relay is an offline-first visual thinking workspace where people and browser agents shape the same board. It combines an infinite canvas, hosted share links, typed brainstorming elements, visual connections, semantic clusters, reusable structured artifacts, and exportable multi-agent decision traces.
+AI-Mural 是一个通用的多人协作头脑风暴 Agent。成员在同一块白板上提出观点、整理关系、讨论方案并确认成果；AI 根据当前真实内容提出建议，成员确认后才会执行。
 
-The repository includes a tiny Express + Drizzle + SQLite backend with capability-based access and no account system or third-party services. The browser writes to `localStorage` first and synchronizes hosted murals and recordings to SQLite when the backend is available, so the app remains useful offline and takes one command to run.
+## 从空白讨论开始
 
-## Quick start
+首次打开时填写话题、目标、背景、限制条件和成员昵称。话题、目标和昵称必填，背景与限制可留空。创建后得到空白白板，成员和观点由参与者添加，不预置主题、案例或 AI 回复。
 
-Requirements: Node.js 20 or newer.
-
-```bash
-npm install
-npm run dev
-```
-
-Open the localhost URL printed by Vite. The included demo board loads automatically on first use.
-
-- Web app: `http://localhost:5173`
-- Local API: `http://localhost:5174`
-- SQLite file: `data/canvas-relay.sqlite` (created automatically)
-
-Useful commands:
-
-```bash
-npm run test
-npm run lint
-npm run build
-npm run preview
-```
-
-## What people can do
-
-- Pan, zoom, select, drag, resize, and connect elements on an infinite canvas.
-- Add ideas, questions, insights, actions, frames, decision matrices, concept cards, and checklists.
-- Edit element content, colors, votes, clusters, and positions.
-- Organize the board as a grid, semantic columns, radial map, or compact stack.
-- Undo and redo human or agent mutations.
-- Change element layers from the inspector, keyboard, or right-click menu.
-- Keep a local library of UUID murals, open them in separate instances, and import or export portable JSON.
-- Record a visible multi-agent discussion with participant identity, replies, canvas actions, decisions, and final output.
-- Let the agent that creates a WebMCP session moderate it and mute or reactivate participants.
-- Give agents distinct colors and renewable edit-focus leases that prevent overlapping work.
-- Save editable timeline checkpoints and replay the mural non-destructively with Previous and Next controls.
-- Publish a local mural and create or rotate private collaborator links from the Share dialog.
-- Export a decision trace as JSON, Markdown, or CSV.
-- Reload the page without losing the board.
-
-Keyboard shortcuts:
-
-- `N`: add an idea
-- `Q`: add a question
-- `Delete` or `Backspace`: remove the selected element
-- `Cmd/Ctrl + Z`: undo
-- `Cmd/Ctrl + Shift + Z`: redo
-- `Cmd/Ctrl + D`: duplicate
-- `Cmd/Ctrl + ]` / `[`: move one layer forward or backward
-- `Alt + Cmd/Ctrl + ]` / `[`: move to front or back
-- `+`, `-`, `0`: zoom in, zoom out, fit board
-
-## WebMCP
-
-Canvas Relay registers tools with the current imperative API:
-
-```ts
-document.modelContext.registerTool(tool, { signal })
-```
-
-It falls back to `navigator.modelContext` for earlier browser implementations. The app stays fully usable when WebMCP is unavailable and shows setup guidance in the Agent panel.
-
-Test with either:
-
-- ChatGPT desktop's in-app browser.
-- Google Chrome 149 or newer with `chrome://flags/#enable-webmcp-testing` enabled.
-
-The twenty-seven registered tools are:
-
-| Tool | Purpose |
+| 阶段 | 成员可以做什么 |
 | --- | --- |
-| `canvas_create_mural` | Create a hosted mural plus separate owner and user links. |
-| `canvas_get_board` | Read elements, artifact specs, and connections. |
-| `canvas_rename_mural` | Rename the mural shown beside the logo and in exports. |
-| `canvas_add_element` | Add one visual element. |
-| `canvas_add_elements` | Add up to 30 elements in one action. |
-| `canvas_update_element` | Edit content, type, style, votes, cluster, or position. |
-| `canvas_connect_elements` | Draw a labeled relationship. |
-| `canvas_remove_elements` | Remove elements and attached connections. |
-| `canvas_arrange_board` | Apply grid, semantic columns, radial, or stacked layout. |
-| `canvas_create_cluster` | Add a labeled container and optionally arrange its members. |
-| `canvas_create_artifact` | Create a reusable structured artifact. |
-| `canvas_get_artifact_spec` | Read an artifact's fields, records, and presentation. |
-| `canvas_update_artifact_records` | Replace or append artifact records. |
-| `canvas_focus_elements` | Select and bring elements into view. |
-| `canvas_set_focus` | Claim or release a visible, expiring edit/review focus lease. |
-| `canvas_add_checkpoint` | Let the moderator capture a replayable mural milestone. |
-| `canvas_set_element_layer` | Move an element through the visual z stack. |
-| `canvas_start_recording` | Start a trace; the creating agent becomes moderator. |
-| `canvas_join_session` | Join a mural by UUID and appear in the participant list. |
-| `canvas_invite_agents` | Create a private capability and URL for each named agent guest. |
-| `canvas_redeem_agent_invite` | Redeem an invite URL and join the hosted trace. |
-| `canvas_record_contribution` | Record an explicit proposal, question, critique, evidence item, decision, summary, or result. |
-| `canvas_comment_element` | Add a reviewable agent note to an element and the global conversation. |
-| `canvas_moderate_participant` | Let the moderator mute or reactivate another agent. |
-| `canvas_watch_mural` | Renew a presence lease and poll global or component-scoped changes until the session closes. |
-| `canvas_get_recording` | Read participant identities and the shared event timeline. |
-| `canvas_finalize_recording` | Preserve the final output and close the trace. |
+| 想法收集 | 添加观点、问题、风险、补充信息和候选方案 |
+| 智能归类 | 选择观点，整理分类并保留原始来源 |
+| 引导扩散 | 请求帮助，继续提问和补充不同思路 |
+| 整合方案 | 选中至少两条观点，请求有来源的组合方案 |
+| 协同优化 | 编辑候选方案，添加支持、反对、补充、风险和待验证意见 |
+| 辅助决策 | 人工设置标准与权重，填写评分理由并投票 |
+| 成果输出 | 编辑草稿、选择最终方案、人工确认后导出讨论成果 |
 
-All UI and WebMCP operations use the same action layer. Agent work appears immediately on the human canvas and is recorded in the visual activity stream. The mural UUID routes a call but is not a credential: write tools also require the private capability returned when that agent starts or joins a session. Muted agents cannot keep changing the board, and another caller cannot take over a visible participant ID or the moderator role.
+成员可以手动切换或返回任一阶段，已有内容会保留。观点记录作者、时间、版本和来源；少数意见和风险也会保留。
 
-Recommended agent sequence:
+## AI 建议
 
-1. For a new online collaboration, call `canvas_create_mural`; retain its owner capability and give the separate `userUrl` to the person.
-2. Create named guest links with `canvas_invite_agents`. Each invited agent opens only its own URL and calls `canvas_redeem_agent_invite`.
-3. Include `muralId`, `agentId`, and `agentToken` in protected write and watch calls. Moderation additionally uses the creator's `moderatorToken` capability.
-4. Claim the elements about to be edited with `canvas_set_focus`; default to `releaseOnAction: after_write`, or renew a manual lease through `canvas_watch_mural`.
-5. Repeat `canvas_watch_mural` at its recommended interval to receive changes and know when the session closes. Use review triggers, a quiet period, and a cooldown so agents do not answer their own events or interrupt one another.
-6. Save meaningful milestones with `canvas_add_checkpoint`. Share conclusions with `canvas_record_contribution`; the moderator can use `canvas_moderate_participant` when needed.
+通过“需要帮助”“智能归类选中观点”或“整合选中观点”主动请求建议。请求前会保存当前讨论，服务端读取真实讨论和白板内容，再调用 DeepSeek。
 
-## Artifact Spec 1.0
+建议会进入待确认列表，可以接受、编辑、忽略、稍后处理，或暂停当前阶段。接受后可撤销 AI 动作；如果相关内容已被成员修改，系统会明确拒绝冲突撤销。当前阶段忽略的动作类型不会重复显示。
 
-Artifacts are data, not screenshots or opaque HTML. Each artifact uses a small JSON spec that agents can read, create, update, reuse, and export.
+允许的建议只有分类、连线、提问、整合候选方案、创建比较矩阵和生成成果草稿。服务端严格检查字段和真实观点 ID；请求期间内容变化或访问能力失效时拒绝旧结果。AI 不直接写数据库、改白板、切换阶段或确认最终结果。
 
-Supported artifact types: `table`, `cards`, `checklist`, `matrix`, and `custom`.
+## 保留的功能
 
-Supported primitive field types: `text`, `number`, `status`, `tag`, `boolean`, `date`, and `url`.
-
-Example:
-
-```json
-{
-  "specVersion": "1.0",
-  "artifactType": "matrix",
-  "title": "Decision matrix",
-  "description": "Compare ideas using shared criteria.",
-  "fields": [
-    { "key": "option", "label": "Option", "type": "text", "required": true },
-    { "key": "impact", "label": "Impact", "type": "status", "options": ["High", "Medium", "Low"] },
-    { "key": "effort", "label": "Effort", "type": "status", "options": ["High", "Medium", "Low"] }
-  ],
-  "records": [
-    { "option": "Walking stand-ups", "impact": "High", "effort": "Low" }
-  ],
-  "presentation": {
-    "layout": "table",
-    "density": "compact",
-    "visibleFields": ["option", "impact", "effort"]
-  }
-}
-```
-
-The complete machine-readable JSON Schema is served at [`/artifact-spec.schema.json`](./public/artifact-spec.schema.json). `canvas_get_artifact_spec` also returns that schema URL with the selected artifact.
-
-Limits keep tool calls understandable and safe: 12 fields, 100 records, primitive record values, validated field keys, and plain text rendered by React.
-
-## Suggested agent demo
-
-Start with a blank board and give a WebMCP-capable agent this prompt:
-
-> Create a brainstorm for reducing food waste in a university cafeteria. Add 12 ideas, organize them into Prevention, Redistribution, and Composting, create a central goal, then build a decision matrix comparing the four strongest ideas.
-
-The agent can:
-
-1. Add ideas in one batch.
-2. Read the resulting board and stable element IDs.
-3. Organize ideas and create cluster frames.
-4. Connect groups to the central goal.
-5. Create a structured matrix with fields and primitive records.
-6. Read or update the artifact spec in a follow-up turn.
-
-This demonstrates why WebMCP is central to the experience: the agent works with product concepts and structured data while the user sees, adjusts, and controls the same live visual state.
-
-## Decision Trace
-
-Recording is an explicit, shared collaboration log. It captures user messages, agent contributions, reply relationships, board actions, participants, decisions, and the final board. It does not capture hidden model chain-of-thought or private reasoning.
-
-Use **Trace** for a new recording or load the three-agent demo to see a facilitator, Explorer, Critic, and Synthesizer discuss a decision. The stream stores shared messages and explicit action summaries, never hidden chain-of-thought. Finished sessions can be downloaded as JSON, Markdown, or CSV.
-
-Each mural has a UUID and URL such as `/?mural=<uuid>`. The Murals menu can open any board in a separate tab. Tabs on the same mural merge component changes, deletion tombstones, participants, and trace events over `BroadcastChannel`; hosted clients carry the same version stamps and tombstones through SQLite so simultaneous agent additions and edits are merged instead of blindly replacing the board. Tabs on different murals remain pinned to their own channel. Separate browser profiles or isolated contexts isolate storage completely.
-
-## Lightweight local API
-
-The Vite frontend proxies `/api` to the bundled server while developing. A production build can be served by the same Express process with `npm run build && npm start`.
-
-| Endpoint | Purpose |
+| 功能 | 内容 |
 | --- | --- |
-| `GET /api/health` | Check SQLite availability. |
-| `GET /api/sessions/:id` | Read a full session and final board; hosted traces require a mural capability. |
-| `PUT /api/sessions/:id` | Upsert the current session snapshot; hosted traces require a mural capability. |
-| `DELETE /api/sessions/:id` | Delete one saved session with its mural capability. |
-| `GET /api/sessions/:id/export?format=json\|markdown\|csv` | Compile an authenticated hosted export on the backend. |
-| `POST /api/murals` | Create a hosted mural and owner/user capabilities. |
-| `GET/PUT /api/murals/:id` | Load or synchronize a hosted mural with a capability. |
-| `POST /api/murals/:id/invites` | Create named agent invitations as the owner. |
-| `POST /api/murals/:id/invites/redeem` | Redeem one agent invitation. |
+| 白板 | React Flow 无限画布，卡片、拖拽、缩放、连线、分类、图层、撤销与重做 |
+| 协作 | 本地多标签同步、托管分享链接、独立访问能力和成员来源 |
+| 结构化内容 | 表格、矩阵、卡片和清单，支持读取与编辑数据 |
+| 讨论记录 | 参与者、公开发言、回复、画布动作、检查点和回放 |
+| 导出 | 原始白板 JSON、记录 JSON/Markdown/CSV，以及人工确认后的讨论成果 |
+| 保存 | 浏览器 localStorage 保存本地快照；服务端 SQLite 保存讨论、托管白板和记录 |
+| 浏览器 Agent | 已有 WebMCP 工具继续共用白板动作层，在支持该接口的浏览器中使用 |
 
-## Production deploy
+普通人工白板流程可在本地使用。AI 请求需要可用服务端及 DeepSeek 配置；未连接或未配置时会显示失败，不生成替代回复。
 
-The hidden deployment helper mirrors Beacon's single-host process: it rsyncs the current tree to `/srv/aimural`, builds an isolated Docker Compose project, and exposes only `127.0.0.1:46731` for CloudPanel's nginx reverse proxy.
+## 本地运行
+
+使用 Node.js 24 和 pnpm。
 
 ```bash
-.bin/deploy
+pnpm install
+pnpm dev
 ```
 
-No credentials are stored in the repository. Override the target with `AIMURAL_DEPLOY_HOST` or `AIMURAL_REMOTE_DIR` when needed.
+`pnpm dev` 同时启动前端和 API。打开 Vite 输出的地址，通常为 `http://localhost:5173`；API 默认在 `http://localhost:5174`，开发环境将 `/api` 转发到该地址。
 
-## Local data and privacy
+## DeepSeek 服务端配置
 
-- Mural keys: `canvas-relay-board-v2:<mural-uuid>`
-- Current mural key: `canvas-relay-current-board-v2`
-- Recording keys: `canvas-relay-recording-v1:<mural-uuid>`
-- Theme key: `canvas-relay-theme`
-- SQLite is local to the cloned repository and ignored by Git.
-- No analytics, third-party network requests, cookies, passwords, or account database. Hosted access uses unguessable capabilities stored only as SHA-256 hashes server-side; raw trace listing is not exposed publicly.
-- Resetting the demo replaces the current board but remains undoable during the session.
-- Export before clearing browser storage if you want a portable backup.
-
-## Project structure
-
-```text
-src/
-  components/       Canvas nodes, tool rail, inspector, agent panel
-  lib/api.ts        Optional SQLite synchronization client
-  lib/artifacts.ts  Artifact Spec validation and templates
-  lib/board.ts      Deterministic canvas primitives and layout
-  lib/recording.ts  Decision Trace session model and local exports
-  lib/storage.ts    localStorage persistence
-  lib/webmcp.ts     WebMCP tool registration and schemas
-  App.tsx           Shared action layer, history, and workspace
-server/
-  db.ts             Self-initializing SQLite database
-  schema.ts         Drizzle schema
-  store.ts          Session persistence
-  hosted.ts         Hosted murals and capability-based agent invitations
-  export.ts         Backend JSON, Markdown, and CSV compilation
-  index.ts          Express API and production static server
-public/
-  artifact-spec.schema.json
-.codex/skills/
-  canvas-relay/     Hidden reusable agent workflow, safe for the public repo
-.bin/deploy         One-command rsync + Docker deployment beside Beacon
+```bash
+cp .env.example .env.local
 ```
 
-## License
+在 `.env.local` 中填写自己的密钥和模型名称。该文件已由 `*.local` 规则排除出 Git；示例文件没有真实密钥。
 
-MIT. See [LICENSE](./LICENSE).
+| 变量 | 要求 |
+| --- | --- |
+| `DEEPSEEK_API_KEY` | 必填，仅由服务端读取 |
+| `DEEPSEEK_MODEL` | 必填，填写账户可用的模型名称；没有默认替代模型 |
+| `DEEPSEEK_BASE_URL` | 可选，默认 `https://api.deepseek.com`；可使用兼容服务的基础地址 |
+
+环境文件需要显式加载到启动进程。macOS/Linux 可以在同一个终端中运行：
+
+```bash
+set -a
+. ./.env.local
+set +a
+pnpm dev
+```
+
+其他环境可通过进程管理器或终端设置相同变量。不要将密钥写进浏览器代码或以 `VITE_` 命名。没有 Key、缺少或错误的模型配置、上游 HTTP 错误、非 JSON 内容和非法动作都会明确报错。
+
+## 构建与部署
+
+```bash
+pnpm build
+pnpm start
+```
+
+启动前将服务端环境变量加载到进程。Express 同时提供 `dist/` 中的前端页面和 `/api` 接口，默认监听 5174 端口；部署需保留服务端及其引用的 `src/lib` 共享校验源码，不能只上传 `dist/`。
+
+| 变量 | 作用 |
+| --- | --- |
+| `CANVAS_RELAY_PORT` | API 和生产网页的监听端口，默认 5174 |
+| `CANVAS_RELAY_DB_PATH` | SQLite 文件位置，默认 `data/canvas-relay.sqlite` |
+| `CANVAS_RELAY_PUBLIC_URL` | 对外访问域名，用于生成协作链接 |
+
+通过反向代理把访问域名转发到应用端口，并保留 SQLite 数据目录。容器配置在 `Dockerfile` 和 `deploy/docker-compose.host.yml`；Docker 运行所需共享源码的末轮修复及验证仍在 Task 7 进行。
+
+## 测试与常用命令
+
+| 命令 | 用途 |
+| --- | --- |
+| `pnpm test` | 运行领域、组件、持久化、建议校验和 HTTP 接口测试 |
+| `pnpm build` | 检查 TypeScript 并构建前端 |
+| `pnpm lint` | 检查源码 |
+| `pnpm dev:web` | 单独启动前端 |
+| `pnpm dev:server` | 单独启动 API |
+| `pnpm preview` | 预览构建后的前端，API 需单独运行 |
+
+HTTP 接口测试需要绑定本机端口。测试样本只放在测试文件中；测试不会使用真实 DeepSeek Key。
+
+## 技术架构
+
+React 和 TypeScript 管理讨论界面，React Flow 显示白板。`src/App.tsx` 统一画布与讨论操作及历史；`src/lib` 提供领域模型、校验、建议执行和本地保存。Express 提供 API，通过 Drizzle 读写 SQLite，并用服务端原生 fetch 调用 DeepSeek。模块职责和调用关系见 [ARCHITECTURE.md](./ARCHITECTURE.md)。
+
+浏览器先保存本地快照，托管协作通过 API 同步。讨论使用独立的 `brainstorm_sessions` 表，保留原有白板和记录表。分享链接携带访问能力，托管讨论读写和 AI 请求都必须通过同一能力检查。
+
+## 搜索记录
+
+| 来源 | 借鉴 | 不采纳 |
+| --- | --- | --- |
+| [skills.sh：brainstorm](https://www.skills.sh/shhac/skills/brainstorm) | 明确目标和限制，先发散再收敛，由参与者选择方案 | 不把通用提问流程变成强制阶段锁定或自动决策 |
+| [Iamwangli/agent-canvas](https://github.com/Iamwangli/agent-canvas) | React Flow 的关系表达、来源追溯和多成员思考上下文 | 不迁移整套产品，不采用模型自动分支或自动创建节点 |
+| [nicklyuu/ai-whiteboard](https://github.com/nicklyuu/ai-whiteboard) | 白板与侧栏共同工作，使用当前画布构成 AI 上下文 | 不采用自动清空白板、跳过人工确认执行或清洗猜测错误 JSON |
+
+## 已完成与待办
+
+| 项目 | 当前状态 |
+| --- | --- |
+| Task 1：空白讨论和领域模型 | 已完成 |
+| Task 2：人工工作区、阶段、成员、方案、决策与成果 | 已完成 |
+| Task 3：localStorage 与 SQLite 讨论持久化 | 已完成 |
+| Task 4：DeepSeek 服务端适配与严格校验 | 已完成 |
+| Task 5：建议展示、确认、编辑、忽略、暂停和撤销 | 已完成 |
+| Task 6：文档 | 已更新；最终测试和源码审查待主任务完成 |
+| Task 7：末轮修复 | Docker 源码运行依赖和默认成员行为正在修复 |
+
+进度与关键决定见 [CONTEXT.md](./CONTEXT.md)，实施步骤见 [实施计划](./docs/superpowers/plans/2026-10-10-multiplayer-brainstorm-agent.md)。
+
+## 许可
+
+MIT，见 [LICENSE](./LICENSE)。
