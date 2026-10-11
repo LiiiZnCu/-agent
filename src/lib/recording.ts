@@ -31,10 +31,11 @@ export function loadRecording(boardId?: string): RecordingSession | null {
     if (!raw) return null
     const parsed = JSON.parse(raw) as RecordingSession
     if (parsed.specVersion !== '1.0' || !Array.isArray(parsed.events) || !Array.isArray(parsed.participants)) return null
+    if (!parsed.moderatorId || !parsed.participants.some((participant) => participant.id === parsed.moderatorId)) return null
     return {
       ...parsed,
       boardId: parsed.boardId ?? boardId,
-      moderatorId: parsed.moderatorId ?? parsed.participants[0]?.id ?? 'human-facilitator',
+      moderatorId: parsed.moderatorId,
       participants: parsed.participants.map((participant, index) => ({
         ...participant,
         status: participant.status ?? 'active',
@@ -52,10 +53,13 @@ export function saveRecording(session: RecordingSession | null, boardId?: string
   else window.localStorage.setItem(key, JSON.stringify(session))
 }
 
-export function createRecordingSession(title = 'Multi-agent brainstorm', actor?: RecordingParticipant, boardId?: string): RecordingSession {
+export function createRecordingSession(title: string, actor?: RecordingParticipant, boardId?: string): RecordingSession {
+  const cleanTitle = title.trim().slice(0, 120)
+  if (!cleanTitle) throw new Error('录制标题不能为空。')
+  if (!actor?.id.trim() || !actor.name.trim()) throw new Error('录制需要明确成员。')
   const startedAt = new Date().toISOString()
   const human = {
-    ...(actor ?? { id: 'human-facilitator', name: 'Facilitator', role: 'human' as const }),
+    ...actor,
     status: 'active' as const,
     joinedAt: actor?.joinedAt ?? startedAt,
     lastSeenAt: startedAt,
@@ -63,7 +67,7 @@ export function createRecordingSession(title = 'Multi-agent brainstorm', actor?:
   return {
     specVersion: '1.0',
     id: createUUID(),
-    title: title.trim().slice(0, 120) || 'Multi-agent brainstorm',
+    title: cleanTitle,
     status: 'recording',
     startedAt,
     boardId,
@@ -195,7 +199,8 @@ export function setRecordingFocus(session: RecordingSession, participantId: stri
 }
 
 export function addRecordingCheckpoint(session: RecordingSession, label: string, board: BoardSnapshot, actor?: RecordingParticipant): RecordingSession {
-  const participant = actor ?? session.participants.find((candidate) => candidate.id === session.moderatorId) ?? session.participants[0]
+  const participant = actor && session.participants.find((candidate) => candidate.id === actor.id && candidate.role === actor.role)
+  if (!participant) throw new Error('保存检查点需要明确成员。')
   const cleanLabel = label.trim().slice(0, 120) || `Checkpoint ${session.events.filter((event) => event.kind === 'checkpoint').length + 1}`
   return appendEvent(session, {
     participantId: participant.id,
@@ -249,7 +254,8 @@ export function moderateRecording(session: RecordingSession, participantId: stri
 }
 
 export function completeRecording(session: RecordingSession, finalOutput: string, actor?: RecordingParticipant): RecordingSession {
-  const facilitator = actor ?? { id: 'human-facilitator', name: 'Facilitator', role: 'human' as const }
+  const facilitator = actor && session.participants.find((participant) => participant.id === actor.id && participant.role === actor.role)
+  if (!facilitator) throw new Error('结束录制需要明确成员。')
   const withResult = appendEvent(session, {
     participantId: facilitator.id,
     participantName: facilitator.name,

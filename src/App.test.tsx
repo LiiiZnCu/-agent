@@ -18,6 +18,33 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('讨论入口', () => {
+  it('无讨论成员时不显示虚构成员，录制明确失败', () => {
+    saveBoard(createEmptyBoard('旧白板'))
+    render(<App />)
+    expect(screen.getByRole('button', { name: '尚未添加成员' })).toBeTruthy()
+    fireEvent.click(screen.getAllByRole('button', { name: 'Trace' })[0])
+    fireEvent.click(screen.getByRole('button', { name: 'Record session' }))
+    expect(screen.getByRole('status').textContent).toContain('明确成员')
+    expect(screen.queryByRole('button', { name: 'Finish session' })).toBeNull()
+  })
+
+  it('录制和消息使用当前选定成员的真实身份', async () => {
+    createDiscussion()
+    fireEvent.change(screen.getByLabelText('新成员昵称'), { target: { value: '小夏' } })
+    fireEvent.click(screen.getByRole('button', { name: '添加成员' }))
+    const selector = screen.getByLabelText('当前成员') as HTMLSelectElement
+    const memberId = selector.options[1].value
+    fireEvent.change(selector, { target: { value: memberId } })
+    fireEvent.change(screen.getByLabelText('Message your agents'), { target: { value: '我的想法' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send message to the shared stream' }))
+    const boardId = localStorage.getItem('canvas-relay-current-board-v2')
+    await waitFor(() => {
+      const recording = JSON.parse(localStorage.getItem(`canvas-relay-recording-v1:${boardId}`) || 'null')
+      expect(recording?.participants[0]).toMatchObject({ id: memberId, name: '小夏', role: 'human' })
+      expect(recording?.events.at(-1)).toMatchObject({ participantId: memberId, participantName: '小夏', content: '我的想法' })
+    })
+  })
+
   function createDiscussion() {
     render(<App />)
     fireEvent.change(screen.getByLabelText('主题'), { target: { value: '社区花园' } })

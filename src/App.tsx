@@ -306,13 +306,23 @@ function Workspace() {
     broadcastRef.current?.postMessage({ type: 'sync', sender: instanceId, board: snapshotNow(), recording, nodeTombstones: nodeTombstonesRef.current, edgeTombstones: edgeTombstonesRef.current })
   }, [boardId, edges, instanceId, name, nodes, recording, snapshotNow])
 
+  const currentHuman = useCallback((memberId?: string) => {
+    const discussion = sessionRef.current
+    const member = discussion?.boardId === boardIdRef.current
+      ? discussion.members.find((candidate) => candidate.id === (memberId ?? discussion.currentMemberId))
+      : undefined
+    if (!member) throw new Error('请先添加明确成员。')
+    return { id: member.id, name: member.name, role: 'human' as const }
+  }, [])
+
   const reportActivity = useCallback((label: string, detail: string, source: Activity['source'] = 'system', relatedElementIds?: string[], recordInTrace = true) => {
+    const member = sessionRef.current?.members.find((candidate) => candidate.id === sessionRef.current?.currentMemberId)
     const activity: Activity = {
       id: createId('activity'),
       label,
       detail,
       source,
-      actorName: source === 'agent' ? 'Canvas Relay' : source === 'human' ? 'You' : 'System',
+      actorName: source === 'agent' ? 'Canvas Relay' : source === 'human' ? member?.name : 'System',
       createdAt: new Date().toISOString(),
       relatedElementIds,
     }
@@ -320,7 +330,7 @@ function Workspace() {
     const activeRecording = recordingRef.current
     if (recordInTrace && source !== 'agent' && activeRecording?.status === 'recording') {
       const participant = source === 'human'
-          ? { id: 'human-facilitator', name: 'You', role: 'human' as const }
+          ? currentHuman()
           : { id: 'canvas-relay', name: 'Canvas Relay', role: 'system' as const }
       const next = appendEvent(activeRecording, {
         participantId: participant.id,
@@ -333,7 +343,7 @@ function Workspace() {
       recordingRef.current = next
       setRecording(next)
     }
-  }, [])
+  }, [currentHuman])
 
   const announce = useCallback((message: string) => {
     setToast(message)
@@ -836,8 +846,8 @@ function Workspace() {
   const getRecording = useCallback(() => recordingRef.current ? structuredClone(recordingRef.current) : null, [])
 
   const startRecording = useCallback<RecordingActions['startRecording']>((title, actor) => {
+    const human = currentHuman(actor?.role === 'human' ? actor.id : undefined)
     if (recordingRef.current?.status === 'recording' && recordingRef.current.boardId === boardIdRef.current) return recordingRef.current
-    const human = actor?.role === 'human' ? actor : { id: 'human-facilitator', name: 'You', role: 'human' as const, specialty: 'Facilitator' }
     let session = createRecordingSession(title || `${nameRef.current} decision trace`, human, boardIdRef.current)
     if (actor?.role === 'agent') {
       session = joinRecording(session, { ...actor, status: 'active' })
@@ -850,7 +860,7 @@ function Workspace() {
     }
     setActivities((current) => [activity, ...current].slice(0, 30))
     return session
-  }, [])
+  }, [currentHuman])
 
   const joinParticipant = useCallback<RecordingActions['joinParticipant']>((participant) => {
     const current = recordingRef.current
@@ -896,9 +906,10 @@ function Workspace() {
   const recordUserMessage = useCallback<RecordingActions['recordUserMessage']>((content, kind = 'question', relatedElementIds) => {
     const current = recordingRef.current
     if (!current) throw new Error('Start a recording before adding your contribution.')
+    const member = currentHuman()
     const next = appendEvent(current, {
-      participantId: 'human-facilitator',
-      participantName: 'You',
+      participantId: member.id,
+      participantName: member.name,
       participantRole: 'human',
       kind,
       content,
@@ -908,11 +919,11 @@ function Workspace() {
     recordingRef.current = next
     setRecording(next)
     const activity: Activity = {
-      id: createId('activity'), label: `You: ${kind}`, detail: content.slice(0, 120), source: 'human', createdAt: event.createdAt, relatedElementIds,
+      id: createId('activity'), label: `${member.name}: ${kind}`, detail: content.slice(0, 120), source: 'human', createdAt: event.createdAt, relatedElementIds,
     }
     setActivities((activities) => [activity, ...activities].slice(0, 30))
     return event
-  }, [])
+  }, [currentHuman])
 
   const moderateParticipant = useCallback<RecordingActions['moderateParticipant']>((participantId, muted, moderatorId) => {
     const current = recordingRef.current
@@ -974,7 +985,7 @@ function Workspace() {
     const current = recordingRef.current
     if (!current) throw new Error('No recording is active.')
     if (current.status === 'complete') return current
-    const next = completeRecording(current, finalOutput, actor)
+    const next = completeRecording(current, finalOutput, actor?.role === 'agent' ? actor : currentHuman(actor?.id))
     recordingRef.current = next
     setRecording(next)
     const activity: Activity = {
@@ -982,7 +993,7 @@ function Workspace() {
     }
     setActivities((activities) => [activity, ...activities].slice(0, 30))
     return next
-  }, [])
+  }, [currentHuman])
 
   const recordingActions = useMemo<RecordingActions>(() => ({
     getRecording,
@@ -1474,28 +1485,37 @@ function Workspace() {
   }, [clearSelection])
 
   const sendUserMessage = useCallback((content: string) => {
-    if (recordingRef.current?.status !== 'recording') startRecording(`${nameRef.current} decision trace`)
-    recordUserMessage(content, 'question')
-    openPanel('stream')
-    announce('Message added to the shared stream')
-  }, [announce, openPanel, recordUserMessage, startRecording])
+    try {
+      currentHuman()
+      if (recordingRef.current?.status !== 'recording') startRecording(`${nameRef.current} decision trace`)
+      recordUserMessage(content, 'question')
+      openPanel('stream')
+      announce('Message added to the shared stream')
+    } catch (error) { if (!(error instanceof Error)) throw error; announce(error.message) }
+  }, [announce, currentHuman, openPanel, recordUserMessage, startRecording])
 
   const commentOnElement = useCallback((id: string, content: string) => {
-    if (recordingRef.current?.status !== 'recording') startRecording(`${nameRef.current} decision trace`)
-    recordUserMessage(content, 'note', [id])
-    announce('Comment added to the element and global conversation')
-  }, [announce, recordUserMessage, startRecording])
+    try {
+      currentHuman()
+      if (recordingRef.current?.status !== 'recording') startRecording(`${nameRef.current} decision trace`)
+      recordUserMessage(content, 'note', [id])
+      announce('Comment added to the element and global conversation')
+    } catch (error) { if (!(error instanceof Error)) throw error; announce(error.message) }
+  }, [announce, currentHuman, recordUserMessage, startRecording])
 
   const finishRecordingFromUI = useCallback(() => {
     const current = recordingRef.current
     if (!current || current.status !== 'recording') return
-    const artifactCount = nodesRef.current.filter((node) => node.data.kind === 'artifact').length
-    const decisions = current.events.filter((event) => event.kind === 'decision').length
-    finalizeRecording(
-      `Session completed with ${nodesRef.current.length} visual elements, ${edgesRef.current.length} connections, ${artifactCount} structured artifacts, and ${decisions} explicit decisions.`,
-    )
-    announce('Decision trace finalized and ready to export')
-  }, [announce, finalizeRecording])
+    try {
+      currentHuman()
+      const artifactCount = nodesRef.current.filter((node) => node.data.kind === 'artifact').length
+      const decisions = current.events.filter((event) => event.kind === 'decision').length
+      finalizeRecording(
+        `Session completed with ${nodesRef.current.length} visual elements, ${edgesRef.current.length} connections, ${artifactCount} structured artifacts, and ${decisions} explicit decisions.`,
+      )
+      announce('Decision trace finalized and ready to export')
+    } catch (error) { if (!(error instanceof Error)) throw error; announce(error.message) }
+  }, [announce, currentHuman, finalizeRecording])
 
   const exportRecording = useCallback((format: 'json' | 'markdown' | 'csv') => {
     if (sessionRef.current && !isOutcomeConfirmed(sessionRef.current)) {
@@ -1568,12 +1588,15 @@ function Workspace() {
   }, [announce, shareUrl])
 
   const saveCurrentCheckpoint = useCallback(() => {
-    if (recordingRef.current?.status !== 'recording') startRecording(`${nameRef.current} decision trace`)
-    const current = recordingRef.current!
-    const index = current.events.filter((event) => event.kind === 'checkpoint').length + 1
-    createCheckpoint(`Checkpoint ${index}`, snapshotNow(), { id: 'human-facilitator', name: 'You', role: 'human' })
-    announce(`Checkpoint ${index} saved`)
-  }, [announce, createCheckpoint, snapshotNow, startRecording])
+    try {
+      const member = currentHuman()
+      if (recordingRef.current?.status !== 'recording') startRecording(`${nameRef.current} decision trace`)
+      const current = recordingRef.current!
+      const index = current.events.filter((event) => event.kind === 'checkpoint').length + 1
+      createCheckpoint(`Checkpoint ${index}`, snapshotNow(), member)
+      announce(`Checkpoint ${index} saved`)
+    } catch (error) { if (!(error instanceof Error)) throw error; announce(error.message) }
+  }, [announce, createCheckpoint, currentHuman, snapshotNow, startRecording])
 
   const renameCheckpointFromUI = useCallback((eventId: string, label: string) => {
     updateCheckpoint(eventId, label)
@@ -1784,6 +1807,7 @@ function Workspace() {
 
           <CollaborationDock
             recording={recording}
+            members={session?.members ?? []}
             onSend={sendUserMessage}
             onOpenTrace={() => openPanel('stream')}
           />
@@ -1850,7 +1874,7 @@ function Workspace() {
           backendState={backendState}
           onViewChange={setPanelView}
           onClose={() => setAgentOpen(false)}
-          onStartRecording={() => startRecording()}
+          onStartRecording={() => { try { startRecording() } catch (error) { if (!(error instanceof Error)) throw error; announce(error.message) } }}
           onFinalizeRecording={finishRecordingFromUI}
           onExportRecording={exportRecording}
           exportBlockedReason={session && !isOutcomeConfirmed(session) ? '请先确认讨论成果，再导出讨论记录。' : undefined}

@@ -25,7 +25,7 @@ sqlite.exec(`
     status TEXT NOT NULL,
     started_at TEXT NOT NULL,
     board_id TEXT,
-    moderator_id TEXT NOT NULL DEFAULT 'human-facilitator',
+    moderator_id TEXT NOT NULL,
     completed_at TEXT,
     final_output TEXT,
     board_json TEXT NOT NULL,
@@ -115,7 +115,7 @@ if (!participantColumns.some((column) => column.name === 'focus_json')) sqlite.e
 
 const sessionColumns = sqlite.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>
 if (!sessionColumns.some((column) => column.name === 'board_id')) sqlite.exec('ALTER TABLE sessions ADD COLUMN board_id TEXT')
-if (!sessionColumns.some((column) => column.name === 'moderator_id')) sqlite.exec("ALTER TABLE sessions ADD COLUMN moderator_id TEXT NOT NULL DEFAULT 'human-facilitator'")
+if (!sessionColumns.some((column) => column.name === 'moderator_id')) sqlite.exec('ALTER TABLE sessions ADD COLUMN moderator_id TEXT')
 
 const eventColumns = sqlite.prepare('PRAGMA table_info(events)').all() as Array<{ name: string }>
 if (!eventColumns.some((column) => column.name === 'checkpoint_json')) sqlite.exec('ALTER TABLE events ADD COLUMN checkpoint_json TEXT')

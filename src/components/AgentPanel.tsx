@@ -187,7 +187,7 @@ export function AgentPanel({
           {combinedActivities.length ? (
             <div className="activity-list visual-activity-list">{combinedActivities.map((activity) => (
               <article className="activity-item" key={activity.id}>
-                <span className={`activity-source source-${activity.source}`}>{activity.actorName ?? (activity.source === 'human' ? 'You' : activity.source === 'system' ? 'System' : 'Agent')}</span>
+                <span className={`activity-source source-${activity.source}`}>{activity.actorName ?? (activity.source === 'human' ? '未指定成员' : activity.source === 'system' ? 'System' : 'Agent')}</span>
                 <div><strong>{activity.label}</strong><small>{activity.detail}</small></div>
                 {(activity.relatedElementIds ?? []).map((id) => {
                   const node = nodes.find((candidate) => candidate.id === id)
@@ -250,7 +250,7 @@ export function AgentPanel({
                   <span className={`participant-avatar role-${participant.role}`}>{participant.role === 'agent' ? <Robot size={12} weight="fill" /> : <User size={12} weight="bold" />}</span>
                   <span>
                     <strong>{participant.name}{participant.id === recording.moderatorId && <span className="moderator-mark"><ShieldCheck size={10} weight="fill" />Moderator</span>}</strong>
-                    <small>{status === 'muted' ? 'Muted, observing only' : status === 'offline' ? 'Offline, lease expired' : participant.focus ? `${participant.focus.state === 'editing' ? 'Editing' : 'Reviewing'} ${participant.focus.elementIds.length} components` : participant.watchingElementIds?.length ? `Watching ${participant.watchingElementIds.length} components` : participant.role === 'human' ? 'You, facilitator' : participant.specialty || 'Agent'}</small>
+                    <small>{status === 'muted' ? 'Muted, observing only' : status === 'offline' ? 'Offline, lease expired' : participant.focus ? `${participant.focus.state === 'editing' ? 'Editing' : 'Reviewing'} ${participant.focus.elementIds.length} components` : participant.watchingElementIds?.length ? `Watching ${participant.watchingElementIds.length} components` : participant.role === 'human' ? '讨论成员' : participant.specialty || 'Agent'}</small>
                   </span>
                 </button>
               )})}</div>

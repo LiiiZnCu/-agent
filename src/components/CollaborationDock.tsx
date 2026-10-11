@@ -1,10 +1,11 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { PaperPlaneTilt, Plus, Robot, User } from '@phosphor-icons/react'
-import type { RecordingParticipant, RecordingSession } from '../types'
+import type { BrainstormMember, RecordingParticipant, RecordingSession } from '../types'
 import { AGENT_COLOR_HEX } from '../lib/recording'
 
 type Props = {
   recording: RecordingSession | null
+  members: BrainstormMember[]
   onSend: (content: string) => void
   onOpenTrace: () => void
 }
@@ -13,16 +14,15 @@ function initials(participant: RecordingParticipant) {
   return participant.name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase()
 }
 
-export function CollaborationDock({ recording, onSend, onOpenTrace }: Props) {
+export function CollaborationDock({ recording, members, onSend, onOpenTrace }: Props) {
   const [message, setMessage] = useState('')
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 5000)
     return () => window.clearInterval(timer)
   }, [])
-  const participants = recording?.participants.filter((participant) => participant.role !== 'system') ?? [
-    { id: 'human-facilitator', name: 'You', role: 'human' as const, specialty: 'Facilitator' },
-  ]
+  const participants = recording?.participants.filter((participant) => participant.role !== 'system')
+    ?? members.map((member): RecordingParticipant => ({ id: member.id, name: member.name, role: 'human' }))
 
   return (
     <div className="collaboration-dock" aria-label="Collaborate with agents">
@@ -50,7 +50,7 @@ export function CollaborationDock({ recording, onSend, onOpenTrace }: Props) {
           )}
         </div>
         <button type="button" className="presence-label" onClick={onOpenTrace}>
-          {recording ? `${participants.length} in this mural` : 'You are here'}
+          {participants.length ? `${participants.length} in this mural` : '尚未添加成员'}
         </button>
       </div>
 

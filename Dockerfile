@@ -15,6 +15,9 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
 COPY server ./server
 COPY src/types.ts ./src/types.ts
+COPY src/lib/brainstorm-validation.ts ./src/lib/brainstorm-validation.ts
+COPY src/lib/board-validation.ts ./src/lib/board-validation.ts
+COPY src/lib/artifacts.ts ./src/lib/artifacts.ts
 RUN mkdir -p /app/data && chown -R node:node /app
 
 USER node

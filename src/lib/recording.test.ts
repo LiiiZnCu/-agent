@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { addRecordingCheckpoint, appendEvent, completeRecording, createRecordingSession, deleteRecordingCheckpoint, joinRecording, moderateRecording, recordingToCsv, recordingToMarkdown, renameRecordingCheckpoint, setRecordingFocus, watchRecording } from './recording'
 
 describe('multi-agent recording', () => {
+  it('没有明确操作者时拒绝建立或结束记录', () => {
+    expect(() => createRecordingSession('空记录')).toThrow('明确成员')
+    expect(() => createRecordingSession('', { id: 'm1', name: '小林', role: 'human' })).toThrow('标题')
+    const session = createRecordingSession('记录', { id: 'm1', name: '小林', role: 'human' })
+    expect(() => completeRecording(session, '完成')).toThrow('明确成员')
+    expect(completeRecording(session, '完成', { id: 'm1', name: '小林', role: 'human' }).events.at(-1)).toMatchObject({ participantId: 'm1', participantName: '小林' })
+  })
   it('assigns moderation to the agent that creates the session', () => {
     const session = createRecordingSession('Moderated', { id: 'agent-moderator', name: 'Moderator', role: 'agent' }, 'mural-uuid')
     expect(session.moderatorId).toBe('agent-moderator')
@@ -32,7 +39,7 @@ describe('multi-agent recording', () => {
   })
 
   it('assigns distinct agent colors and prevents conflicting edit focus', () => {
-    let session = createRecordingSession('Focus', undefined, 'mural-uuid')
+    let session = createRecordingSession('Focus', { id: 'm1', name: '小林', role: 'human' }, 'mural-uuid')
     session = joinRecording(session, { id: 'one', name: 'One', role: 'agent' })
     session = joinRecording(session, { id: 'two', name: 'Two', role: 'agent' })
     expect(session.participants.find((participant) => participant.id === 'one')?.color).not.toBe(session.participants.find((participant) => participant.id === 'two')?.color)
@@ -49,7 +56,10 @@ describe('multi-agent recording', () => {
 
   it('stores editable replay checkpoints without changing the live board', () => {
     const board = { id: 'mural-uuid', name: 'Replay', nodes: [], edges: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
-    let session = addRecordingCheckpoint(createRecordingSession('Replay', undefined, board.id), 'First pass', board)
+    const member = { id: 'm1', name: '小林', role: 'human' as const }
+    const original = createRecordingSession('Replay', member, board.id)
+    expect(() => addRecordingCheckpoint(original, 'First pass', board)).toThrow('明确成员')
+    let session = addRecordingCheckpoint(original, 'First pass', board, member)
     const checkpointId = session.events.at(-1)!.id
     expect(session.events.at(-1)?.checkpoint?.board).toEqual(board)
     session = renameRecordingCheckpoint(session, checkpointId, 'Research complete')
@@ -59,7 +69,7 @@ describe('multi-agent recording', () => {
   })
 
   it('tracks participants, replies, and decisions in order', () => {
-    let session = createRecordingSession('Launch brainstorm')
+    let session = createRecordingSession('Launch brainstorm', { id: 'm1', name: '小林', role: 'human' })
     session = appendEvent(session, {
       participantId: 'agent-research',
       participantName: 'Research agent',
@@ -81,7 +91,8 @@ describe('multi-agent recording', () => {
   })
 
   it('finalizes and exports the deliberation with the board', () => {
-    const completed = completeRecording(createRecordingSession(), 'Test both interviews and behavior data.')
+    const member = { id: 'm1', name: '小林', role: 'human' as const }
+    const completed = completeRecording(createRecordingSession('Brainstorm', member), 'Test both interviews and behavior data.', member)
     const markdown = recordingToMarkdown(completed, {
       id: '23a683bd-a7ac-47a4-afc4-7cfb93ecf781',
       name: 'Launch board',
@@ -97,9 +108,9 @@ describe('multi-agent recording', () => {
   })
 
   it('exports contribution fields as portable CSV', () => {
-    const session = appendEvent(createRecordingSession('CSV trace'), {
-      participantId: 'human-facilitator',
-      participantName: 'You',
+    const session = appendEvent(createRecordingSession('CSV trace', { id: 'm1', name: '小林', role: 'human' }), {
+      participantId: 'm1',
+      participantName: '小林',
       participantRole: 'human',
       kind: 'decision',
       content: 'Ship the small, local version first.',
