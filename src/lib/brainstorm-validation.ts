@@ -1,5 +1,5 @@
 import type { AgentSuggestion, BoardSnapshot, BrainstormSession } from '../types'
-import { isSnapshot } from './board-validation'
+import { isSnapshot } from './board-validation.ts'
 export type StoredBrainstorm = { board: BoardSnapshot; session: BrainstormSession }
 
 type RecordValue = Record<string, unknown>

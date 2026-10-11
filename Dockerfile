@@ -25,4 +25,4 @@ EXPOSE 5174
 HEALTHCHECK --interval=15s --timeout=5s --start-period=15s --retries=8 \
   CMD node -e "fetch('http://127.0.0.1:5174/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["node", "server/index.ts"]
+CMD ["node", "--experimental-transform-types", "server/index.ts"]

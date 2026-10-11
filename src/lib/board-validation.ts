@@ -1,5 +1,5 @@
 import type { BoardSnapshot } from '../types'
-import { validateArtifactSpec } from './artifacts'
+import { validateArtifactSpec } from './artifacts.ts'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)

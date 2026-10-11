@@ -316,7 +316,10 @@ function Workspace() {
   }, [])
 
   const reportActivity = useCallback((label: string, detail: string, source: Activity['source'] = 'system', relatedElementIds?: string[], recordInTrace = true) => {
-    const member = sessionRef.current?.members.find((candidate) => candidate.id === sessionRef.current?.currentMemberId)
+    const discussion = sessionRef.current
+    const member = discussion?.boardId === boardIdRef.current
+      ? discussion.members.find((candidate) => candidate.id === discussion.currentMemberId)
+      : undefined
     const activity: Activity = {
       id: createId('activity'),
       label,
@@ -328,7 +331,7 @@ function Workspace() {
     }
     setActivities((current) => [activity, ...current].slice(0, 30))
     const activeRecording = recordingRef.current
-    if (recordInTrace && source !== 'agent' && activeRecording?.status === 'recording') {
+    if (recordInTrace && source !== 'agent' && activeRecording?.status === 'recording' && (source !== 'human' || member)) {
       const participant = source === 'human'
           ? currentHuman()
           : { id: 'canvas-relay', name: 'Canvas Relay', role: 'system' as const }
@@ -846,17 +849,13 @@ function Workspace() {
   const getRecording = useCallback(() => recordingRef.current ? structuredClone(recordingRef.current) : null, [])
 
   const startRecording = useCallback<RecordingActions['startRecording']>((title, actor) => {
-    const human = currentHuman(actor?.role === 'human' ? actor.id : undefined)
+    const recordingActor = actor?.role === 'agent' ? actor : currentHuman(actor?.id)
     if (recordingRef.current?.status === 'recording' && recordingRef.current.boardId === boardIdRef.current) return recordingRef.current
-    let session = createRecordingSession(title || `${nameRef.current} decision trace`, human, boardIdRef.current)
-    if (actor?.role === 'agent') {
-      session = joinRecording(session, { ...actor, status: 'active' })
-      session = { ...session, moderatorId: actor.id }
-    }
+    const session = createRecordingSession(title || `${nameRef.current} decision trace`, recordingActor, boardIdRef.current)
     recordingRef.current = session
     setRecording(session)
     const activity: Activity = {
-      id: createId('activity'), label: 'Recording started', detail: session.title, source: 'human', createdAt: new Date().toISOString(),
+      id: createId('activity'), label: 'Recording started', detail: session.title, source: recordingActor.role === 'agent' ? 'agent' : 'human', createdAt: new Date().toISOString(),
     }
     setActivities((current) => [activity, ...current].slice(0, 30))
     return session
@@ -955,12 +954,16 @@ function Workspace() {
   const createCheckpoint = useCallback<RecordingActions['createCheckpoint']>((label, board, actor) => {
     const current = recordingRef.current
     if (!current) throw new Error('No decision trace is active.')
-    const next = addRecordingCheckpoint(current, label, board, actor)
+    const member = actor?.role === 'human' ? currentHuman(actor.id) : actor
+    const withMember = member?.role === 'human' && !current.participants.some((participant) => participant.id === member.id)
+      ? joinRecording(current, member)
+      : current
+    const next = addRecordingCheckpoint(withMember, label, board, member)
     const event = next.events.at(-1)!
     recordingRef.current = next
     setRecording(next)
     return event
-  }, [])
+  }, [currentHuman])
 
   const updateCheckpoint = useCallback<RecordingActions['updateCheckpoint']>((eventId, label) => {
     const current = recordingRef.current
@@ -985,7 +988,11 @@ function Workspace() {
     const current = recordingRef.current
     if (!current) throw new Error('No recording is active.')
     if (current.status === 'complete') return current
-    const next = completeRecording(current, finalOutput, actor?.role === 'agent' ? actor : currentHuman(actor?.id))
+    const member = actor?.role === 'agent' ? actor : currentHuman(actor?.id)
+    const withMember = member.role === 'human' && !current.participants.some((participant) => participant.id === member.id)
+      ? joinRecording(current, member)
+      : current
+    const next = completeRecording(withMember, finalOutput, member)
     recordingRef.current = next
     setRecording(next)
     const activity: Activity = {
@@ -1373,8 +1380,8 @@ function Workspace() {
       } else if ((event.key === 'Backspace' || event.key === 'Delete') && selectedId) {
         event.preventDefault()
         removeElements([selectedId], 'human')
-      } else if (event.key.toLowerCase() === 'n') addElement({ title: 'New idea', kind: 'idea' })
-      else if (event.key.toLowerCase() === 'q') addElement({ title: 'New question', kind: 'question' })
+      } else if (event.key.toLowerCase() === 'n') addElement({ title: '', kind: 'idea' })
+      else if (event.key.toLowerCase() === 'q') addElement({ title: '', kind: 'question' })
       else if (event.key === '+' || event.key === '=') flowRef.current?.zoomIn({ duration: 180 })
       else if (event.key === '-') flowRef.current?.zoomOut({ duration: 180 })
       else if (event.key === '0') flowRef.current?.fitView({ padding: 0.2, duration: 300 })

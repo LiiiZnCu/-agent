@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import App from './App'
 import { createEmptyBoard } from './lib/board'
 import { saveBoard } from './lib/storage'
+import { createRecordingSession, saveRecording } from './lib/recording'
 import type { BoardSnapshot, BrainstormSession } from './types'
 
 beforeEach(() => {
@@ -18,6 +19,104 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('讨论入口', () => {
+  it('代理明确创建托管白板时以真实代理身份开始记录', async () => {
+    const tools: Array<{ name: string; execute: (input: Record<string, unknown>) => Promise<{ structuredContent: { session: { moderatorId: string; participants: Array<{ id: string }> } } }> }> = []
+    Object.defineProperty(document, 'modelContext', { configurable: true, value: { registerTool: (tool: typeof tools[number]) => tools.push(tool) } })
+    saveBoard(createEmptyBoard('本地白板'))
+    vi.stubGlobal('fetch', async (url: string, options?: RequestInit) => {
+      if (url === '/api/murals') {
+        const payload = JSON.parse(options!.body as string)
+        return new Response(JSON.stringify({ board: { ...payload.board, id: 'hosted-agent-board', name: payload.name }, revision: 1, ownerToken: 'owner', userToken: 'user', ownerUrl: 'http://localhost/?mural=hosted-agent-board#owner=owner', userUrl: 'http://localhost/?mural=hosted-agent-board#access=user' }))
+      }
+      return new Response('{}')
+    })
+    render(<App />)
+    await waitFor(() => expect(tools.some((tool) => tool.name === 'canvas_create_mural')).toBe(true))
+    const result = await tools.find((tool) => tool.name === 'canvas_create_mural')!.execute({ name: '代理创建的白板', creatorAgentId: 'agent-1', creatorAgentName: '明确代理' })
+    expect(result.structuredContent.session.moderatorId).toBe('agent-1')
+    expect(result.structuredContent.session.participants).toEqual([expect.objectContaining({ id: 'agent-1' })])
+  })
+  it('旧白板有录制但没有讨论成员时画布操作不追加伪造事件', async () => {
+    const board = createEmptyBoard('旧白板')
+    saveBoard(board)
+    saveRecording(createRecordingSession('旧记录', { id: 'old-human', name: '旧成员', role: 'human' }, board.id), board.id)
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add idea' }))
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem(`canvas-relay-board-v2:${board.id}`) || 'null')
+      expect(stored.nodes).toHaveLength(1)
+    })
+    expect(JSON.parse(localStorage.getItem(`canvas-relay-recording-v1:${board.id}`)!).events).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Close inspector' }))
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Collaboration views' })).getByRole('button', { name: 'Activity' }))
+    expect(screen.getByText('未指定成员')).toBeTruthy()
+  })
+
+  it('N 和 Q 快捷键只创建空白内容', async () => {
+    createDiscussion()
+    fireEvent.keyDown(document.body, { key: 'n' })
+    fireEvent.keyDown(document.body, { key: 'q' })
+    const boardId = localStorage.getItem('canvas-relay-current-board-v2')
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem(`canvas-relay-board-v2:${boardId}`) || 'null')
+      expect(stored.nodes).toHaveLength(2)
+      expect(stored.nodes.map((node: { data: { title: string; body: string } }) => [node.data.title, node.data.body])).toEqual([['', ''], ['', '']])
+    })
+  })
+
+  it('新增的真实成员可保存检查点并结束录制', async () => {
+    createDiscussion()
+    fireEvent.click(screen.getAllByRole('button', { name: 'Trace' })[0])
+    fireEvent.click(screen.getByRole('button', { name: 'Record session' }))
+    fireEvent.change(screen.getByLabelText('新成员昵称'), { target: { value: '小夏' } })
+    fireEvent.click(screen.getByRole('button', { name: '添加成员' }))
+    const selector = screen.getByLabelText('当前成员') as HTMLSelectElement
+    const memberId = selector.options[1].value
+    fireEvent.change(selector, { target: { value: memberId } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save current' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Finish session' }))
+    const boardId = localStorage.getItem('canvas-relay-current-board-v2')
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem(`canvas-relay-recording-v1:${boardId}`) || 'null')
+      expect(stored.status).toBe('complete')
+      expect(stored.participants).toContainEqual(expect.objectContaining({ id: memberId, name: '小夏' }))
+      expect(stored.events.filter((event: { kind: string }) => event.kind === 'checkpoint')).toHaveLength(1)
+      expect(stored.events.at(-1)).toMatchObject({ participantId: memberId, participantName: '小夏' })
+    })
+  })
+
+  it('新增的真实成员未保存检查点也可直接结束录制', async () => {
+    createDiscussion()
+    fireEvent.click(screen.getAllByRole('button', { name: 'Trace' })[0])
+    fireEvent.click(screen.getByRole('button', { name: 'Record session' }))
+    fireEvent.change(screen.getByLabelText('新成员昵称'), { target: { value: '小夏' } })
+    fireEvent.click(screen.getByRole('button', { name: '添加成员' }))
+    const selector = screen.getByLabelText('当前成员') as HTMLSelectElement
+    const memberId = selector.options[1].value
+    fireEvent.change(selector, { target: { value: memberId } })
+    fireEvent.click(screen.getByRole('button', { name: 'Finish session' }))
+    const boardId = localStorage.getItem('canvas-relay-current-board-v2')
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem(`canvas-relay-recording-v1:${boardId}`) || 'null')
+      expect(stored.status).toBe('complete')
+      expect(stored.events.at(-1)).toMatchObject({ participantId: memberId, participantName: '小夏' })
+    })
+  })
+
+  it('普通人类成员的详情不标成主持人', () => {
+    createDiscussion()
+    fireEvent.click(screen.getAllByRole('button', { name: 'Trace' })[0])
+    fireEvent.click(screen.getByRole('button', { name: 'Record session' }))
+    fireEvent.change(screen.getByLabelText('新成员昵称'), { target: { value: '小夏' } })
+    fireEvent.click(screen.getByRole('button', { name: '添加成员' }))
+    const selector = screen.getByLabelText('当前成员') as HTMLSelectElement
+    fireEvent.change(selector, { target: { value: selector.options[1].value } })
+    fireEvent.change(screen.getByLabelText('Message your agents'), { target: { value: '参与讨论' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send message to the shared stream' }))
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Collaboration views' })).getByRole('button', { name: 'Trace' }))
+    fireEvent.click(Array.from(document.querySelectorAll<HTMLButtonElement>('.participant-list .participant-chip')).find((button) => button.textContent?.includes('小夏'))!)
+    expect(screen.getByRole('dialog', { name: '小夏 participant details' }).textContent).toContain('讨论成员')
+  })
   it('无讨论成员时不显示虚构成员，录制明确失败', () => {
     saveBoard(createEmptyBoard('旧白板'))
     render(<App />)

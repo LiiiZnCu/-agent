@@ -87,7 +87,8 @@ export function getSession(id: string): StoredSession | null {
   const stored = db.select().from(sessions).where(eq(sessions.id, id)).get()
   if (!stored) return null
   const storedParticipants = db.select().from(participants).where(eq(participants.sessionId, id)).orderBy(asc(participants.sequence)).all()
-  if (!stored.moderatorId || !storedParticipants.some((participant) => participant.id === stored.moderatorId)) return null
+  const moderatorId = stored.moderatorId ?? storedParticipants[0]?.id
+  if (!moderatorId || !storedParticipants.some((participant) => participant.id === moderatorId)) return null
   const storedEvents = db.select().from(events).where(eq(events.sessionId, id)).orderBy(asc(events.sequence)).all()
 
   return {
@@ -98,7 +99,7 @@ export function getSession(id: string): StoredSession | null {
       status: stored.status as RecordingSession['status'],
       startedAt: stored.startedAt,
       boardId: stored.boardId ?? undefined,
-      moderatorId: stored.moderatorId,
+      moderatorId,
       completedAt: stored.completedAt ?? undefined,
       finalOutput: stored.finalOutput ?? undefined,
       participants: storedParticipants.map((participant): RecordingParticipant => ({

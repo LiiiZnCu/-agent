@@ -258,7 +258,7 @@ export function AgentPanel({
                 <div className="agent-participant-popover" role="dialog" aria-label={`${selectedParticipant.name} participant details`}>
                   <button type="button" className="icon-button" onClick={() => setSelectedParticipantId(null)} aria-label="Close participant details"><X size={14} /></button>
                   <span className={`participant-avatar role-${selectedParticipant.role}`} style={selectedParticipant.color ? { '--agent-color': AGENT_COLOR_HEX[selectedParticipant.color] } as CSSProperties : undefined}>{selectedParticipant.role === 'agent' ? <Robot size={13} weight="fill" /> : <User size={13} weight="bold" />}</span>
-                  <div><span className="panel-kicker">{selectedParticipant.role} · {selectedParticipantStatus}</span><strong>{selectedParticipant.name}</strong><p>{selectedParticipant.specialty || (selectedParticipant.role === 'human' ? 'Human facilitator' : 'Agent participant')}</p></div>
+                  <div><span className="panel-kicker">{selectedParticipant.role} · {selectedParticipantStatus}</span><strong>{selectedParticipant.name}</strong><p>{selectedParticipant.specialty || (selectedParticipant.role === 'human' ? '讨论成员' : 'Agent participant')}</p></div>
                   <dl>
                     <div><dt>Participant ID</dt><dd>{selectedParticipant.id}</dd></div>
                     <div><dt>Watching</dt><dd>{selectedParticipant.watchingElementIds?.length ? `${selectedParticipant.watchingElementIds.length} components` : 'Global mural stream'}</dd></div>
