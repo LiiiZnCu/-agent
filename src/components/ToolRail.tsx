@@ -28,43 +28,43 @@ export function ToolRail({ onAdd, onArtifact, onIdea }: Props) {
   }
 
   return (
-    <aside className="tool-rail" aria-label="Canvas tools">
-      <button className="tool-button is-active" type="button" aria-label="Select and move" data-tooltip="Select">
+    <aside className="tool-rail" aria-label="画布工具">
+      <button className="tool-button is-active" type="button" aria-label="选择并移动" data-tooltip="选择">
         <CursorClick size={20} weight="bold" />
       </button>
       <span className="tool-divider" />
       {onIdea && <>
-        <button className="tool-button" type="button" aria-label="Add risk" data-tooltip="风险" onClick={() => onIdea('risk')}><Warning size={20} weight="bold" /></button>
-        <button className="tool-button" type="button" aria-label="Add evidence" data-tooltip="补充信息" onClick={() => onIdea('evidence')}><FileText size={20} weight="bold" /></button>
-        <button className="tool-button" type="button" aria-label="Add proposal" data-tooltip="候选方案" onClick={() => onIdea('proposal')}><CardsThree size={20} weight="bold" /></button>
+        <button className="tool-button" type="button" aria-label="添加风险" data-tooltip="风险" onClick={() => onIdea('risk')}><Warning size={20} weight="bold" /></button>
+        <button className="tool-button" type="button" aria-label="添加补充信息" data-tooltip="补充信息" onClick={() => onIdea('evidence')}><FileText size={20} weight="bold" /></button>
+        <button className="tool-button" type="button" aria-label="添加候选方案" data-tooltip="候选方案" onClick={() => onIdea('proposal')}><CardsThree size={20} weight="bold" /></button>
       </>}
-      <button className="tool-button" type="button" aria-label="Add idea" data-tooltip="Idea" onClick={() => onAdd('idea')}>
+      <button className="tool-button" type="button" aria-label="添加观点" data-tooltip="观点" onClick={() => onAdd('idea')}>
         <Lightbulb size={20} weight="bold" />
       </button>
-      <button className="tool-button" type="button" aria-label="Add question" data-tooltip="Question" onClick={() => onAdd('question')}>
+      <button className="tool-button" type="button" aria-label="添加问题" data-tooltip="问题" onClick={() => onAdd('question')}>
         <QuestionMark size={20} weight="bold" />
       </button>
-      <button className="tool-button" type="button" aria-label="Add insight" data-tooltip="Insight" onClick={() => onAdd('insight')}>
+      <button className="tool-button" type="button" aria-label="添加洞察" data-tooltip="洞察" onClick={() => onAdd('insight')}>
         <MagnifyingGlass size={20} weight="bold" />
       </button>
-      <button className="tool-button" type="button" aria-label="Add action" data-tooltip="Action" onClick={() => onAdd('action')}>
+      <button className="tool-button" type="button" aria-label="添加行动" data-tooltip="行动" onClick={() => onAdd('action')}>
         <CheckCircle size={20} weight="bold" />
       </button>
-      <button className="tool-button" type="button" aria-label="Add frame" data-tooltip="Frame" onClick={() => onAdd('frame')}>
+      <button className="tool-button" type="button" aria-label="添加分类框" data-tooltip="分类框" onClick={() => onAdd('frame')}>
         <FrameCorners size={20} weight="bold" />
       </button>
       <span className="tool-divider" />
       <details className="artifact-menu">
-        <summary className="tool-button" aria-label="Add structured artifact" data-tooltip="Artifacts">
+        <summary className="tool-button" aria-label="添加结构化成果" data-tooltip="结构化成果">
           <Table size={20} weight="bold" />
           <Plus size={10} weight="bold" className="tool-plus" />
         </summary>
         <div className="artifact-menu-popover">
-          <strong>Structured artifact</strong>
-          <span>Reusable data with a readable spec.</span>
-          <button type="button" onClick={(event) => chooseArtifact(event, 'decision')}><Table size={17} />Decision matrix</button>
-          <button type="button" onClick={(event) => chooseArtifact(event, 'cards')}><CardsThree size={17} />Concept cards</button>
-          <button type="button" onClick={(event) => chooseArtifact(event, 'checklist')}><ListChecks size={17} />Checklist</button>
+          <strong>结构化成果</strong>
+          <span>可复用的数据，附有清晰的结构说明。</span>
+          <button type="button" onClick={(event) => chooseArtifact(event, 'decision')}><Table size={17} />决策矩阵</button>
+          <button type="button" onClick={(event) => chooseArtifact(event, 'cards')}><CardsThree size={17} />概念卡片</button>
+          <button type="button" onClick={(event) => chooseArtifact(event, 'checklist')}><ListChecks size={17} />检查清单</button>
         </div>
       </details>
     </aside>

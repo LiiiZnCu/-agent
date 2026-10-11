@@ -24,7 +24,7 @@ function ProposalCard({ proposal, session, nodes, onChange }: { proposal: Propos
     <p>状态：{proposal.status === 'accepted' ? '已接受' : proposal.status === 'rejected' ? '已拒绝' : '草稿'}</p>
     <div className="discussion-actions"><button type="button" disabled={!proposal.title.trim()} onClick={() => update({ status: 'accepted' })}>接受方案</button><button type="button" onClick={() => update({ status: 'rejected' })}>拒绝方案</button><button type="button" onClick={() => update({ status: 'draft' })}>恢复草稿</button></div>
     <h4>所有意见（含少数意见）</h4>
-    {proposal.comments.map((item) => <article className="proposal-comment" key={item.id}><span>{COMMENT_LABELS[item.kind]} · {session.members.find((member) => member.id === item.authorId)?.name ?? item.authorId}</span><p>{item.content}</p><time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleString()}</time></article>)}
+    {proposal.comments.map((item) => <article className="proposal-comment" key={item.id}><span>{COMMENT_LABELS[item.kind]} · {session.members.find((member) => member.id === item.authorId)?.name ?? item.authorId}</span><p>{item.content}</p><time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleString('zh-CN')}</time></article>)}
     <form onSubmit={(event) => {
       event.preventDefault()
       if (!comment.trim()) return

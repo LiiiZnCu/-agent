@@ -12,15 +12,15 @@ type Props = {
 
 export function LayerMenu({ x, y, title, onLayer, onDuplicate, onDelete }: Props) {
   return (
-    <div className="layer-context-menu" role="menu" style={{ left: x, top: y }} aria-label={`Arrange ${title}`}>
-      <div className="layer-menu-title"><Stack size={15} /><span>Layer</span><strong>{title}</strong></div>
-      <button type="button" role="menuitem" onClick={() => onLayer('front')}><ArrowUp size={15} weight="bold" /><span>Bring to front</span><kbd>⌥⌘]</kbd></button>
-      <button type="button" role="menuitem" onClick={() => onLayer('forward')}><ArrowUp size={15} /><span>Bring forward</span><kbd>⌘]</kbd></button>
-      <button type="button" role="menuitem" onClick={() => onLayer('backward')}><ArrowDown size={15} /><span>Send backward</span><kbd>⌘[</kbd></button>
-      <button type="button" role="menuitem" onClick={() => onLayer('back')}><ArrowDown size={15} weight="bold" /><span>Send to back</span><kbd>⌥⌘[</kbd></button>
+    <div className="layer-context-menu" role="menu" style={{ left: x, top: y }} aria-label={`调整 ${title} 的层级`}>
+      <div className="layer-menu-title"><Stack size={15} /><span>层级</span><strong>{title}</strong></div>
+      <button type="button" role="menuitem" onClick={() => onLayer('front')}><ArrowUp size={15} weight="bold" /><span>置于最前</span><kbd>⌥⌘]</kbd></button>
+      <button type="button" role="menuitem" onClick={() => onLayer('forward')}><ArrowUp size={15} /><span>上移一层</span><kbd>⌘]</kbd></button>
+      <button type="button" role="menuitem" onClick={() => onLayer('backward')}><ArrowDown size={15} /><span>下移一层</span><kbd>⌘[</kbd></button>
+      <button type="button" role="menuitem" onClick={() => onLayer('back')}><ArrowDown size={15} weight="bold" /><span>置于最后</span><kbd>⌥⌘[</kbd></button>
       <span className="layer-menu-divider" />
-      <button type="button" role="menuitem" onClick={onDuplicate}><Copy size={15} /><span>Duplicate</span></button>
-      <button type="button" role="menuitem" className="is-danger" onClick={onDelete}><Trash size={15} /><span>Delete</span></button>
+      <button type="button" role="menuitem" onClick={onDuplicate}><Copy size={15} /><span>复制</span></button>
+      <button type="button" role="menuitem" className="is-danger" onClick={onDelete}><Trash size={15} /><span>删除</span></button>
     </div>
   )
 }

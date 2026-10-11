@@ -18,8 +18,8 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
 function rename(name: string) {
-  fireEvent.change(screen.getByLabelText('Mural name'), { target: { value: name } })
-  fireEvent.blur(screen.getByLabelText('Mural name'))
+  fireEvent.change(screen.getByLabelText('白板名称'), { target: { value: name } })
+  fireEvent.blur(screen.getByLabelText('白板名称'))
 }
 async function respond(pending: Pending, revision: number, name = pending.board.name) {
   await act(async () => pending.resolve(new Response(JSON.stringify({ ok: true, board: { ...pending.board, name }, revision }))))
@@ -42,8 +42,8 @@ async function hostedHarness() {
     return Promise.resolve(new Response('{}'))
   })
   render(<App />)
-  await screen.findByText('Connected to hosted mural as owner')
-  fireEvent.click(screen.getAllByRole('button', { name: 'Trace' })[0])
+  await screen.findByText('已连接到托管白板，身份：所有者')
+  fireEvent.click(screen.getAllByRole('button', { name: '记录' })[0])
   return { writes, discussions }
 }
 
@@ -54,9 +54,9 @@ it('新保存 B 确认后，旧托管回包 A 不能覆盖 B 或继续保存旧�
   rename('编辑 B')
   await waitFor(() => expect(writes).toHaveLength(2))
   await respond(writes[1], 3, '确认 B')
-  expect((screen.getByLabelText('Mural name') as HTMLInputElement).value).toBe('确认 B')
+  expect((screen.getByLabelText('白板名称') as HTMLInputElement).value).toBe('确认 B')
   await respond(writes[0], 2, '过期确认 A')
-  expect((screen.getByLabelText('Mural name') as HTMLInputElement).value).toBe('确认 B')
+  expect((screen.getByLabelText('白板名称') as HTMLInputElement).value).toBe('确认 B')
   expect(discussions.map((snapshot) => snapshot.name)).toEqual(['确认 B'])
 })
 
@@ -64,11 +64,11 @@ it('切换白板后，旧托管回包不能重新打开原白板', async () => {
   const { writes } = await hostedHarness()
   rename('编辑 A')
   await waitFor(() => expect(writes).toHaveLength(1))
-  fireEvent.click(screen.getByRole('button', { name: 'New blank board' }))
+  fireEvent.click(screen.getByRole('button', { name: '新建空白白板' }))
   const nextId = localStorage.getItem('canvas-relay-current-board-v2')
-  const nextName = (screen.getByLabelText('Mural name') as HTMLInputElement).value
+  const nextName = (screen.getByLabelText('白板名称') as HTMLInputElement).value
   await respond(writes[0], 2, '过期托管白板')
-  expect((screen.getByLabelText('Mural name') as HTMLInputElement).value).toBe(nextName)
+  expect((screen.getByLabelText('白板名称') as HTMLInputElement).value).toBe(nextName)
   expect(new URLSearchParams(window.location.search).get('mural')).toBe(nextId)
 })
 
@@ -79,8 +79,8 @@ it('新编辑尚未保存时，旧托管回执不能标记同步成功', async (
   rename('编辑 B')
   await waitFor(() => expect(writes).toHaveLength(2))
   await respond(writes[0], 2)
-  expect((screen.getByLabelText('Mural name') as HTMLInputElement).value).toBe('编辑 B')
-  expect(document.querySelector('.storage-status')?.textContent).toContain('Syncing SQLite')
+  expect((screen.getByLabelText('白板名称') as HTMLInputElement).value).toBe('编辑 B')
+  expect(document.querySelector('.storage-status')?.textContent).toContain('正在同步 SQLite')
 })
 
 it('本地讨论连续保存使用单调版本，旧回执不提前标记成功', async () => {
@@ -93,13 +93,13 @@ it('本地讨论连续保存使用单调版本，旧回执不提前标记成功'
     return Promise.resolve(new Response('{}'))
   })
   render(<App />)
-  fireEvent.click(screen.getAllByRole('button', { name: 'Trace' })[0])
+  fireEvent.click(screen.getAllByRole('button', { name: '记录' })[0])
   await waitFor(() => expect(writes).toHaveLength(1))
   fireEvent.click(screen.getByRole('button', { name: '智能归类' }))
   await waitFor(() => expect(writes).toHaveLength(2))
   expect(Date.parse(writes[1].board.updatedAt)).toBeGreaterThan(Date.parse(writes[0].board.updatedAt))
   await act(async () => writes[0].resolve(new Response(JSON.stringify({ ok: true, sessionId: session.id, updatedAt: writes[0].board.updatedAt }))))
-  expect(document.querySelector('.storage-status')?.textContent).toContain('Syncing SQLite')
+  expect(document.querySelector('.storage-status')?.textContent).toContain('正在同步 SQLite')
   await act(async () => writes[1].resolve(new Response(JSON.stringify({ ok: true, sessionId: session.id, updatedAt: writes[1].board.updatedAt }))))
-  expect(document.querySelector('.storage-status')?.textContent).toContain('Synced to local SQLite')
+  expect(document.querySelector('.storage-status')?.textContent).toContain('已同步到本地 SQLite')
 })

@@ -25,8 +25,8 @@ export function CollaborationDock({ recording, members, onSend, onOpenTrace }: P
     ?? members.map((member): RecordingParticipant => ({ id: member.id, name: member.name, role: 'human' }))
 
   return (
-    <div className="collaboration-dock" aria-label="Collaborate with agents">
-      <div className="presence-orbit" aria-label={`${participants.length} participants connected`}>
+    <div className="collaboration-dock" aria-label="与智能体协作">
+      <div className="presence-orbit" aria-label={`${participants.length} 位成员已连接`}>
         <div className="presence-stack">
           {participants.slice(0, 6).map((participant, index) => {
             const status = participant.status !== 'muted' && participant.leaseExpiresAt && new Date(participant.leaseExpiresAt).getTime() < now ? 'offline' : participant.status ?? 'active'
@@ -36,21 +36,21 @@ export function CollaborationDock({ recording, members, onSend, onOpenTrace }: P
               key={participant.id}
               className={`presence-avatar role-${participant.role} state-${status}`}
               style={{ zIndex: participants.length - index, ...(participant.color ? { '--agent-color': AGENT_COLOR_HEX[participant.color] } : {}) } as CSSProperties}
-              title={`${participant.name}${participant.id === recording?.moderatorId ? ', moderator' : ''}${participant.specialty ? `: ${participant.specialty}` : ''}`}
+              title={`${participant.name}${participant.id === recording?.moderatorId ? '，主持人' : ''}${participant.specialty ? `：${participant.specialty}` : ''}`}
               onClick={onOpenTrace}
             >
               {participant.role === 'agent' ? initials(participant) || <Robot size={15} /> : <User size={15} weight="bold" />}
-              <span className="presence-live" aria-label={status === 'muted' ? 'Muted' : status === 'offline' ? 'Offline' : 'Connected'} />
+              <span className="presence-live" aria-label={status === 'muted' ? '已静音' : status === 'offline' ? '离线' : '已连接'} />
             </button>
           )})}
           {!recording && (
-            <button type="button" className="presence-avatar presence-invite" onClick={onOpenTrace} title="Connect agents with WebMCP">
+            <button type="button" className="presence-avatar presence-invite" onClick={onOpenTrace} title="通过 WebMCP 连接智能体">
               <Plus size={15} weight="bold" />
             </button>
           )}
         </div>
         <button type="button" className="presence-label" onClick={onOpenTrace}>
-          {participants.length ? `${participants.length} in this mural` : '尚未添加成员'}
+          {participants.length ? `白板中有 ${participants.length} 位成员` : '尚未添加成员'}
         </button>
       </div>
 
@@ -61,20 +61,20 @@ export function CollaborationDock({ recording, members, onSend, onOpenTrace }: P
         onSend(content)
         setMessage('')
       }}>
-        <label htmlFor="canvas-agent-message">Message your agents</label>
+        <label htmlFor="canvas-agent-message">给智能体发送消息</label>
         <div>
           <input
             id="canvas-agent-message"
             value={message}
             onChange={(event) => setMessage(event.target.value)}
-            placeholder="Ask, add a constraint, or make a decision"
+            placeholder="提出问题、补充约束或作出决定"
             maxLength={5000}
           />
-          <button type="submit" disabled={!message.trim()} aria-label="Send message to the shared stream">
+          <button type="submit" disabled={!message.trim()} aria-label="发送消息到共享讨论">
             <PaperPlaneTilt size={17} weight="fill" />
           </button>
         </div>
-        <span>{recording?.status === 'recording' ? 'Shared live and added to the trace' : 'Sending starts a new decision trace'}</span>
+        <span>{recording?.status === 'recording' ? '实时共享并加入记录' : '发送后开始新的决策记录'}</span>
       </form>
     </div>
   )

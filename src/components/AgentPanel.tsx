@@ -26,6 +26,16 @@ import type { Activity, AgentColor, BoardNode, RecordingEvent, RecordingSession 
 
 export type AgentPanelView = 'stream' | 'activity' | 'session' | 'agent'
 
+const EVENT_LABELS: Record<RecordingEvent['kind'], string> = {
+  proposal: '方案', question: '问题', critique: '评议', evidence: '依据', decision: '决定',
+  note: '备注', reasoning_summary: '推理摘要', result: '结果', board_action: '白板操作', checkpoint: '检查点',
+}
+const NODE_LABELS: Record<BoardNode['data']['kind'], string> = {
+  idea: '观点', question: '问题', insight: '洞察', action: '行动', frame: '分类框', artifact: '结构化成果',
+}
+const ROLE_LABELS = { human: '讨论成员', agent: '智能体', system: '系统' } as const
+const STATUS_LABELS = { connecting: '连接中', active: '在线', offline: '离线', muted: '已静音' } as const
+
 type Props = {
   isOpen: boolean
   view: AgentPanelView
@@ -56,7 +66,7 @@ function formatElapsed(startedAt: string, now: number) {
 }
 
 function eventTime(value: string) {
-  return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return new Date(value).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
 
 function ElementReference({ node, onFocus }: { node: BoardNode; onFocus: () => void }) {
@@ -66,13 +76,13 @@ function ElementReference({ node, onFocus }: { node: BoardNode; onFocus: () => v
       <button type="button" className="mini-reference mini-artifact-reference" onClick={onFocus}>
         <span><Table size={12} weight="bold" />{artifact.artifactType}</span>
         <strong>{artifact.title}</strong>
-        <div>{artifact.fields.slice(0, 3).map((field) => <code key={field.key}>{field.label}</code>)}<small>{artifact.records.length} rows</small></div>
+        <div>{artifact.fields.slice(0, 3).map((field) => <code key={field.key}>{field.label}</code>)}<small>{artifact.records.length} 行</small></div>
       </button>
     )
   }
   return (
     <button type="button" className={`mini-reference mini-node-reference color-${node.data.color}`} onClick={onFocus}>
-      <span>{node.data.kind}</span><strong>{node.data.title}</strong>{node.data.body && <small>{node.data.body}</small>}
+      <span>{NODE_LABELS[node.data.kind]}</span><strong>{node.data.title}</strong>{node.data.body && <small>{node.data.body}</small>}
     </button>
   )
 }
@@ -84,8 +94,8 @@ function StreamEvent({ event, events, nodes, color, onFocusElement }: { event: R
     <article className={`stream-event role-${event.participantRole}`} style={color ? { '--agent-color': AGENT_COLOR_HEX[color] } as CSSProperties : undefined}>
       <div className="stream-avatar">{event.participantRole === 'agent' ? event.participantName.slice(0, 2).toUpperCase() : <User size={13} weight="bold" />}</div>
       <div className="stream-event-body">
-        <header><strong>{event.participantName}</strong><span>{event.kind.replace('_', ' ')}</span><time>{eventTime(event.createdAt)}</time></header>
-        {reply && <div className="reply-context">Replying to {reply.participantName}: {reply.content.slice(0, 72)}</div>}
+        <header><strong>{event.participantName}</strong><span>{EVENT_LABELS[event.kind]}</span><time>{eventTime(event.createdAt)}</time></header>
+        {reply && <div className="reply-context">回复 {reply.participantName}：{reply.content.slice(0, 72)}</div>}
         <p>{event.content}</p>
         {references.length > 0 && <div className="stream-references">{references.map((node) => <ElementReference key={node.id} node={node} onFocus={() => onFocusElement(node.id)} />)}</div>}
       </div>
@@ -140,7 +150,7 @@ export function AgentPanel({
     ...localActivities,
     ...actionEvents.map((event): Activity => ({
       id: event.id,
-      label: event.kind === 'result' ? event.participantName : 'Recorded action',
+      label: event.kind === 'result' ? event.participantName : '已记录操作',
       detail: event.content,
       source: event.participantRole === 'agent' ? 'agent' : event.participantRole === 'human' ? 'human' : 'system',
       actorName: event.participantName,
@@ -158,36 +168,36 @@ export function AgentPanel({
     : selectedParticipant?.status ?? 'active'
 
   return (
-    <aside className="agent-panel" aria-label="Collaboration sidebar">
+    <aside className="agent-panel" aria-label="协作侧栏">
       <div className="panel-heading agent-heading">
         <div className="agent-mark"><Robot size={20} weight="fill" /></div>
-        <div><span className="panel-kicker">Canvas Relay</span><h2>Collaboration</h2></div>
-        <button type="button" className="icon-button panel-close" onClick={onClose} aria-label="Close collaboration sidebar"><X size={18} /></button>
+        <div><span className="panel-kicker">AI-Mural</span><h2>协作</h2></div>
+        <button type="button" className="icon-button panel-close" onClick={onClose} aria-label="关闭协作侧栏"><X size={18} /></button>
       </div>
 
-      <nav className="panel-tabs" aria-label="Collaboration views">
-        <button type="button" className={view === 'stream' ? 'is-active' : ''} onClick={() => onViewChange('stream')}><ChatsCircle size={15} />Conversation</button>
-        <button type="button" className={view === 'activity' ? 'is-active' : ''} onClick={() => onViewChange('activity')}><ClockCounterClockwise size={15} />Activity</button>
-        <button type="button" className={view === 'session' ? 'is-active' : ''} onClick={() => onViewChange('session')}><Record size={14} weight="fill" />Trace</button>
-        <button type="button" className={view === 'agent' ? 'is-active' : ''} onClick={() => onViewChange('agent')}><Wrench size={15} />Agent</button>
+      <nav className="panel-tabs" aria-label="协作视图">
+        <button type="button" className={view === 'stream' ? 'is-active' : ''} onClick={() => onViewChange('stream')}><ChatsCircle size={15} />讨论</button>
+        <button type="button" className={view === 'activity' ? 'is-active' : ''} onClick={() => onViewChange('activity')}><ClockCounterClockwise size={15} />活动</button>
+        <button type="button" className={view === 'session' ? 'is-active' : ''} onClick={() => onViewChange('session')}><Record size={14} weight="fill" />记录</button>
+        <button type="button" className={view === 'agent' ? 'is-active' : ''} onClick={() => onViewChange('agent')}><Wrench size={15} />智能体</button>
       </nav>
 
       {view === 'stream' && (
         <section className="stream-section" aria-live="polite">
-          <div className="stream-heading"><div><span className="panel-kicker">Shared conversation</span><h3>{recording?.title ?? 'This mural'}</h3></div><span>{conversationEvents.length}</span></div>
+          <div className="stream-heading"><div><span className="panel-kicker">共享讨论</span><h3>{recording?.title ?? '当前白板'}</h3></div><span>{conversationEvents.length}</span></div>
           {conversationEvents.length ? (
             <div className="stream-list">{conversationEvents.slice(0, 30).map((event) => <StreamEvent key={event.id} event={event} events={recording?.events ?? []} nodes={nodes} color={recording?.participants.find((participant) => participant.id === event.participantId)?.color} onFocusElement={onFocusElement} />)}</div>
-          ) : <div className="stream-empty"><ChatsCircle size={24} /><strong>No messages yet</strong><p>Use the field on the canvas or connect agents to begin a visible brainstorm.</p></div>}
+          ) : <div className="stream-empty"><ChatsCircle size={24} /><strong>暂无消息</strong><p>在画布中发送消息，或连接智能体开始讨论。</p></div>}
         </section>
       )}
 
       {view === 'activity' && (
         <section className="stream-section" aria-live="polite">
-          <div className="stream-heading"><div><span className="panel-kicker">Action history</span><h3>Canvas changes and outputs</h3></div><span>{combinedActivities.length}</span></div>
+          <div className="stream-heading"><div><span className="panel-kicker">操作记录</span><h3>画布变更与成果</h3></div><span>{combinedActivities.length}</span></div>
           {combinedActivities.length ? (
             <div className="activity-list visual-activity-list">{combinedActivities.map((activity) => (
               <article className="activity-item" key={activity.id}>
-                <span className={`activity-source source-${activity.source}`}>{activity.actorName ?? (activity.source === 'human' ? '未指定成员' : activity.source === 'system' ? 'System' : 'Agent')}</span>
+                <span className={`activity-source source-${activity.source}`}>{activity.actorName ?? (activity.source === 'human' ? '未指定成员' : activity.source === 'system' ? '系统' : '智能体')}</span>
                 <div><strong>{activity.label}</strong><small>{activity.detail}</small></div>
                 {(activity.relatedElementIds ?? []).map((id) => {
                   const node = nodes.find((candidate) => candidate.id === id)
@@ -195,39 +205,39 @@ export function AgentPanel({
                 })}
               </article>
             ))}</div>
-          ) : <div className="stream-empty"><ClockCounterClockwise size={24} /><strong>No actions yet</strong><p>Canvas changes and reusable artifact previews will appear in this dedicated history.</p></div>}
+          ) : <div className="stream-empty"><ClockCounterClockwise size={24} /><strong>暂无操作</strong><p>画布变更和可复用成果会显示在这里。</p></div>}
         </section>
       )}
 
       {view === 'session' && (
         <section className="recorder-section standalone-recorder">
           <div className="recorder-header">
-            <div><span className="panel-kicker">Decision trace</span><h3>{recording ? recording.title : 'Record the whole session'}</h3></div>
-            {recording?.status === 'recording' && <span className="rec-badge"><Record size={10} weight="fill" />REC {formatElapsed(recording.startedAt, now)}</span>}
+            <div><span className="panel-kicker">决策记录</span><h3>{recording ? recording.title : '记录整场讨论'}</h3></div>
+            {recording?.status === 'recording' && <span className="rec-badge"><Record size={10} weight="fill" />录制中 {formatElapsed(recording.startedAt, now)}</span>}
           </div>
-          <div className={`storage-status state-${backendState}`}><span />{backendState === 'synced' ? 'Synced to local SQLite' : backendState === 'syncing' ? 'Syncing SQLite' : backendState === 'checking' ? 'Checking local backend' : 'Offline cache active'}</div>
-          {!recording ? <><p>Preserve shared messages, agent work, decisions, and the final mural.</p><div className="recorder-actions"><button type="button" className="record-button" onClick={onStartRecording}><Record size={15} weight="fill" />Record session</button></div></> : (
+          <div className={`storage-status state-${backendState}`}><span />{backendState === 'synced' ? '已同步到本地 SQLite' : backendState === 'syncing' ? '正在同步 SQLite' : backendState === 'checking' ? '正在检查本地服务' : '正在使用离线缓存'}</div>
+          {!recording ? <><p>保存共享消息、智能体工作、决策和最终白板。</p><div className="recorder-actions"><button type="button" className="record-button" onClick={onStartRecording}><Record size={15} weight="fill" />开始记录</button></div></> : (
             <>
-              <div className="session-access"><span>Mural UUID</span><code>{recording.boardId ?? 'Local session'}</code></div>
-              <section className="checkpoint-timeline" aria-label="Replay checkpoints">
-                <div className="checkpoint-heading"><div><Camera size={15} /><strong>Replay checkpoints</strong></div><button type="button" onClick={onAddCheckpoint}>Save current</button></div>
+              <div className="session-access"><span>白板 UUID</span><code>{recording.boardId ?? '本地讨论'}</code></div>
+              <section className="checkpoint-timeline" aria-label="回放检查点">
+                <div className="checkpoint-heading"><div><Camera size={15} /><strong>回放检查点</strong></div><button type="button" onClick={onAddCheckpoint}>保存当前状态</button></div>
                 {checkpoints.length ? (
                   <>
                     <div className="checkpoint-player">
-                      <button type="button" disabled={replayIndex <= 0} onClick={() => onReplayCheckpoint(checkpoints[Math.max(0, replayIndex - 1)]?.id ?? checkpoints[0].id)} aria-label="Previous checkpoint"><ArrowLeft size={15} /></button>
-                      <div><span>{replayIndex >= 0 ? `${replayIndex + 1} / ${checkpoints.length}` : `${checkpoints.length} saved`}</span><strong>{replayIndex >= 0 ? checkpoints[replayIndex].checkpoint!.label : 'Live mural'}</strong></div>
-                      <button type="button" disabled={replayIndex === checkpoints.length - 1} onClick={() => onReplayCheckpoint(checkpoints[replayIndex < 0 ? 0 : replayIndex + 1]?.id ?? null)} aria-label="Next checkpoint"><ArrowRight size={15} /></button>
+                      <button type="button" disabled={replayIndex <= 0} onClick={() => onReplayCheckpoint(checkpoints[Math.max(0, replayIndex - 1)]?.id ?? checkpoints[0].id)} aria-label="上一个检查点"><ArrowLeft size={15} /></button>
+                      <div><span>{replayIndex >= 0 ? `${replayIndex + 1} / ${checkpoints.length}` : `已保存 ${checkpoints.length} 个`}</span><strong>{replayIndex >= 0 ? checkpoints[replayIndex].checkpoint!.label : '实时白板'}</strong></div>
+                      <button type="button" disabled={replayIndex === checkpoints.length - 1} onClick={() => onReplayCheckpoint(checkpoints[replayIndex < 0 ? 0 : replayIndex + 1]?.id ?? null)} aria-label="下一个检查点"><ArrowRight size={15} /></button>
                     </div>
-                    {replayCheckpointId && <button type="button" className="return-live-button" onClick={() => onReplayCheckpoint(null)}>Return to live mural</button>}
+                    {replayCheckpointId && <button type="button" className="return-live-button" onClick={() => onReplayCheckpoint(null)}>返回实时白板</button>}
                     <div className="checkpoint-list">{checkpoints.map((event, index) => (
                       <div className={event.id === replayCheckpointId ? 'is-active' : ''} key={event.id}>
-                        <button type="button" className="checkpoint-open" onClick={() => onReplayCheckpoint(event.id)}><span>{index + 1}</span><strong>{event.checkpoint!.label}</strong><small>{event.checkpoint!.board.nodes.length} elements</small></button>
+                        <button type="button" className="checkpoint-open" onClick={() => onReplayCheckpoint(event.id)}><span>{index + 1}</span><strong>{event.checkpoint!.label}</strong><small>{event.checkpoint!.board.nodes.length} 个元素</small></button>
                         {editingCheckpointId === event.id ? (
                           <input
                             autoFocus
                             value={checkpointDraft}
                             maxLength={120}
-                            aria-label="Checkpoint label"
+                            aria-label="检查点名称"
                             onChange={(input) => setCheckpointDraft(input.target.value)}
                             onBlur={() => { if (checkpointDraft.trim()) onUpdateCheckpoint(event.id, checkpointDraft); setEditingCheckpointId(null) }}
                             onKeyDown={(input) => {
@@ -235,43 +245,43 @@ export function AgentPanel({
                               if (input.key === 'Escape') setEditingCheckpointId(null)
                             }}
                           />
-                        ) : <button type="button" className="checkpoint-icon" onClick={() => { setEditingCheckpointId(event.id); setCheckpointDraft(event.checkpoint!.label) }} aria-label={`Rename ${event.checkpoint!.label}`}><PencilSimple size={13} /></button>}
-                        <button type="button" className="checkpoint-icon is-danger" onClick={() => onDeleteCheckpoint(event.id)} aria-label={`Delete ${event.checkpoint!.label}`}><Trash size={13} /></button>
+                        ) : <button type="button" className="checkpoint-icon" onClick={() => { setEditingCheckpointId(event.id); setCheckpointDraft(event.checkpoint!.label) }} aria-label={`重命名 ${event.checkpoint!.label}`}><PencilSimple size={13} /></button>}
+                        <button type="button" className="checkpoint-icon is-danger" onClick={() => onDeleteCheckpoint(event.id)} aria-label={`删除 ${event.checkpoint!.label}`}><Trash size={13} /></button>
                       </div>
                     ))}</div>
                   </>
-                ) : <p>No checkpoints yet. Save milestones to replay how the mural evolved.</p>}
+                ) : <p>暂无检查点。保存重要节点后可回放白板变化。</p>}
               </section>
-              <div className="participant-heading"><UsersThree size={15} /><strong>{recording.participants.length} participants</strong><span>visible to everyone</span></div>
+              <div className="participant-heading"><UsersThree size={15} /><strong>{recording.participants.length} 位成员</strong><span>所有成员可见</span></div>
               <div className="participant-list">{recording.participants.map((participant) => {
                 const status = participant.status !== 'muted' && participant.leaseExpiresAt && new Date(participant.leaseExpiresAt).getTime() < now ? 'offline' : participant.status ?? 'active'
                 return (
                 <button type="button" className={`participant-chip state-${status}`} style={participant.color ? { '--agent-color': AGENT_COLOR_HEX[participant.color] } as CSSProperties : undefined} key={participant.id} title={participant.specialty} onClick={() => setSelectedParticipantId((current) => current === participant.id ? null : participant.id)} aria-expanded={selectedParticipantId === participant.id}>
                   <span className={`participant-avatar role-${participant.role}`}>{participant.role === 'agent' ? <Robot size={12} weight="fill" /> : <User size={12} weight="bold" />}</span>
                   <span>
-                    <strong>{participant.name}{participant.id === recording.moderatorId && <span className="moderator-mark"><ShieldCheck size={10} weight="fill" />Moderator</span>}</strong>
-                    <small>{status === 'muted' ? 'Muted, observing only' : status === 'offline' ? 'Offline, lease expired' : participant.focus ? `${participant.focus.state === 'editing' ? 'Editing' : 'Reviewing'} ${participant.focus.elementIds.length} components` : participant.watchingElementIds?.length ? `Watching ${participant.watchingElementIds.length} components` : participant.role === 'human' ? '讨论成员' : participant.specialty || 'Agent'}</small>
+                    <strong>{participant.name}{participant.id === recording.moderatorId && <span className="moderator-mark"><ShieldCheck size={10} weight="fill" />主持人</span>}</strong>
+                    <small>{status === 'muted' ? '已静音，仅可旁观' : status === 'offline' ? '离线，连接已过期' : participant.focus ? `${participant.focus.state === 'editing' ? '正在编辑' : '正在查看'} ${participant.focus.elementIds.length} 个元素` : participant.watchingElementIds?.length ? `正在关注 ${participant.watchingElementIds.length} 个元素` : participant.role === 'human' ? '讨论成员' : participant.specialty || '智能体'}</small>
                   </span>
                 </button>
               )})}</div>
               {selectedParticipant && (
-                <div className="agent-participant-popover" role="dialog" aria-label={`${selectedParticipant.name} participant details`}>
-                  <button type="button" className="icon-button" onClick={() => setSelectedParticipantId(null)} aria-label="Close participant details"><X size={14} /></button>
+                <div className="agent-participant-popover" role="dialog" aria-label={`${selectedParticipant.name} 的成员详情`}>
+                  <button type="button" className="icon-button" onClick={() => setSelectedParticipantId(null)} aria-label="关闭成员详情"><X size={14} /></button>
                   <span className={`participant-avatar role-${selectedParticipant.role}`} style={selectedParticipant.color ? { '--agent-color': AGENT_COLOR_HEX[selectedParticipant.color] } as CSSProperties : undefined}>{selectedParticipant.role === 'agent' ? <Robot size={13} weight="fill" /> : <User size={13} weight="bold" />}</span>
-                  <div><span className="panel-kicker">{selectedParticipant.role} · {selectedParticipantStatus}</span><strong>{selectedParticipant.name}</strong><p>{selectedParticipant.specialty || (selectedParticipant.role === 'human' ? '讨论成员' : 'Agent participant')}</p></div>
+                  <div><span className="panel-kicker">{ROLE_LABELS[selectedParticipant.role]} · {STATUS_LABELS[selectedParticipantStatus]}</span><strong>{selectedParticipant.name}</strong><p>{selectedParticipant.specialty || (selectedParticipant.role === 'human' ? '讨论成员' : '智能体成员')}</p></div>
                   <dl>
-                    <div><dt>Participant ID</dt><dd>{selectedParticipant.id}</dd></div>
-                    <div><dt>Watching</dt><dd>{selectedParticipant.watchingElementIds?.length ? `${selectedParticipant.watchingElementIds.length} components` : 'Global mural stream'}</dd></div>
-                    <div><dt>Presence</dt><dd>{selectedParticipant.leaseExpiresAt ? `Lease until ${eventTime(selectedParticipant.leaseExpiresAt)}` : 'Session participant'}</dd></div>
-                    <div><dt>Focus</dt><dd>{selectedParticipant.focus ? `${selectedParticipant.focus.state}: ${selectedParticipant.focus.intent || 'Active work'}` : 'No active focus'}</dd></div>
+                    <div><dt>成员 ID</dt><dd>{selectedParticipant.id}</dd></div>
+                    <div><dt>关注范围</dt><dd>{selectedParticipant.watchingElementIds?.length ? `${selectedParticipant.watchingElementIds.length} 个元素` : '整个白板动态'}</dd></div>
+                    <div><dt>在线状态</dt><dd>{selectedParticipant.leaseExpiresAt ? `连接有效至 ${eventTime(selectedParticipant.leaseExpiresAt)}` : '讨论成员'}</dd></div>
+                    <div><dt>当前工作</dt><dd>{selectedParticipant.focus ? `${selectedParticipant.focus.state === 'editing' ? '正在编辑' : '正在查看'}：${selectedParticipant.focus.intent || '正在工作'}` : '暂无工作'}</dd></div>
                   </dl>
                 </div>
               )}
-              <div className="recorder-stats"><span><strong>{recording.events.length}</strong> events</span><span><strong>{recording.participants.filter((person) => person.role === 'agent').length}</strong> agents</span></div>
-              <div className="recorder-actions">{recording.status === 'recording' ? <button type="button" className="stop-button" onClick={onFinalizeRecording}><Stop size={14} weight="fill" />Finish session</button> : <><button type="button" className="secondary-button" disabled={Boolean(exportBlockedReason)} onClick={() => onExportRecording('json')}><DownloadSimple size={15} />JSON</button><button type="button" className="secondary-button" disabled={Boolean(exportBlockedReason)} onClick={() => onExportRecording('markdown')}><DownloadSimple size={15} />MD</button><button type="button" className="secondary-button" disabled={Boolean(exportBlockedReason)} onClick={() => onExportRecording('csv')}><DownloadSimple size={15} />CSV</button></>}</div>
+              <div className="recorder-stats"><span><strong>{recording.events.length}</strong> 条事件</span><span><strong>{recording.participants.filter((person) => person.role === 'agent').length}</strong> 位智能体</span></div>
+              <div className="recorder-actions">{recording.status === 'recording' ? <button type="button" className="stop-button" onClick={onFinalizeRecording}><Stop size={14} weight="fill" />结束记录</button> : <><button type="button" className="secondary-button" disabled={Boolean(exportBlockedReason)} onClick={() => onExportRecording('json')}><DownloadSimple size={15} />JSON</button><button type="button" className="secondary-button" disabled={Boolean(exportBlockedReason)} onClick={() => onExportRecording('markdown')}><DownloadSimple size={15} />Markdown</button><button type="button" className="secondary-button" disabled={Boolean(exportBlockedReason)} onClick={() => onExportRecording('csv')}><DownloadSimple size={15} />CSV</button></>}</div>
               {recording.status === 'complete' && exportBlockedReason && <p role="note">{exportBlockedReason}</p>}
-              {recording.status === 'complete' && <button type="button" className="text-button new-trace-button" onClick={onStartRecording}>Start another trace</button>}
-              <p className="privacy-note">Shared summaries only. Private model reasoning is never recorded.</p>
+              {recording.status === 'complete' && <button type="button" className="text-button new-trace-button" onClick={onStartRecording}>开始新的记录</button>}
+              <p className="privacy-note">仅记录共享摘要，不记录模型的私有推理。</p>
             </>
           )}
         </section>
@@ -279,8 +289,8 @@ export function AgentPanel({
 
       {view === 'agent' && (
         <>
-          <div className={`webmcp-status ${supported ? 'is-ready' : 'is-offline'}`}><div>{supported ? <Check size={16} weight="bold" /> : <BracketsCurly size={16} weight="bold" />}<strong>{supported ? `WebMCP ready, ${toolCount} tools` : 'WebMCP browser needed'}</strong></div><p>{supported ? 'Agents can read and change this mural directly.' : 'Use ChatGPT or Chromium 149+ with WebMCP enabled.'}</p></div>
-          <section className="agent-section tool-catalog-section"><div className="agent-section-title"><BracketsCurly size={16} /><h3>Tool surface</h3><span>{TOOL_CATALOG.length}</span></div><div className="tool-catalog">{TOOL_CATALOG.map((tool) => <div key={tool.name}><code>{tool.name.replace('canvas_', '')}</code><span className={`tool-mode mode-${tool.mode}`}>{tool.mode}</span></div>)}</div></section>
+          <div className={`webmcp-status ${supported ? 'is-ready' : 'is-offline'}`}><div>{supported ? <Check size={16} weight="bold" /> : <BracketsCurly size={16} weight="bold" />}<strong>{supported ? `WebMCP 已就绪，共 ${toolCount} 个工具` : '需要支持 WebMCP 的浏览器'}</strong></div><p>{supported ? '智能体可以直接读取并修改此白板。' : '请使用已启用 WebMCP 的 ChatGPT 或 Chromium 149+。'}</p></div>
+          <section className="agent-section tool-catalog-section"><div className="agent-section-title"><BracketsCurly size={16} /><h3>工具列表</h3><span>{TOOL_CATALOG.length}</span></div><div className="tool-catalog">{TOOL_CATALOG.map((tool) => <div key={tool.name}><code>{tool.name.replace('canvas_', '')}</code><span className={`tool-mode mode-${tool.mode}`}>{tool.mode === 'read' ? '读取' : tool.mode === 'write' ? '修改' : '删除'}</span></div>)}</div></section>
         </>
       )}
     </aside>

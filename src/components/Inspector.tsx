@@ -28,61 +28,61 @@ export function Inspector({ node, members = [], minimized, onToggleMinimized, on
   const [hasVoted, setHasVoted] = useState(() => window.localStorage.getItem(`canvas-relay-vote:${node.id}`) === 'true')
 
   return (
-    <aside className={`inspector-panel ${minimized ? 'is-minimized' : ''}`} aria-label="Element inspector">
+    <aside className={`inspector-panel ${minimized ? 'is-minimized' : ''}`} aria-label="元素检查器">
       <div className="panel-heading">
         <div>
-          <span className="panel-kicker">Selected element</span>
-          <h2>{minimized ? node.data.title : isArtifact ? 'Artifact settings' : 'Edit content'}</h2>
+          <span className="panel-kicker">已选元素</span>
+          <h2>{minimized ? node.data.title : isArtifact ? '成果设置' : '编辑内容'}</h2>
         </div>
         <div className="inspector-heading-actions">
-          <button type="button" className={`icon-button inspector-comment-toggle ${activeTab === 'comments' ? 'is-active' : ''}`} onClick={() => { setActiveTab('comments'); if (minimized) onToggleMinimized() }} aria-label={`${comments.length} comments`} aria-pressed={activeTab === 'comments'}>
+          <button type="button" className={`icon-button inspector-comment-toggle ${activeTab === 'comments' ? 'is-active' : ''}`} onClick={() => { setActiveTab('comments'); if (minimized) onToggleMinimized() }} aria-label={`${comments.length} 条评论`} aria-pressed={activeTab === 'comments'}>
             <ChatCircleText size={17} /><span>{comments.length}</span>
           </button>
-          <button type="button" className="icon-button" onClick={onToggleMinimized} aria-label={minimized ? 'Expand inspector' : 'Minimize inspector'} aria-expanded={!minimized}>
+          <button type="button" className="icon-button" onClick={onToggleMinimized} aria-label={minimized ? '展开检查器' : '收起检查器'} aria-expanded={!minimized}>
             {minimized ? <ArrowsOutSimple size={17} /> : <Minus size={17} weight="bold" />}
           </button>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close inspector"><X size={18} /></button>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="关闭检查器"><X size={18} /></button>
         </div>
       </div>
 
-      {!minimized && <nav className="inspector-tabs" aria-label="Element panel sections">
-        <button type="button" className={activeTab === 'content' ? 'is-active' : ''} onClick={() => setActiveTab('content')}>Content</button>
-        <button type="button" className={activeTab === 'comments' ? 'is-active' : ''} onClick={() => setActiveTab('comments')}><ChatCircleText size={15} />Comments <span>{comments.length}</span></button>
+      {!minimized && <nav className="inspector-tabs" aria-label="元素面板分区">
+        <button type="button" className={activeTab === 'content' ? 'is-active' : ''} onClick={() => setActiveTab('content')}>内容</button>
+        <button type="button" className={activeTab === 'comments' ? 'is-active' : ''} onClick={() => setActiveTab('comments')}><ChatCircleText size={15} />评论 <span>{comments.length}</span></button>
       </nav>}
 
       {!minimized && node.data.ideaMeta && <section className="idea-metadata" aria-label="观点信息">
         <dl><dt>作者</dt><dd>{members.find((member) => member.id === node.data.ideaMeta!.authorId)?.name ?? node.data.ideaMeta.authorId}</dd>
           <dt>类型</dt><dd>{IDEA_LABELS[node.data.ideaMeta.type]}</dd>
-          <dt>创建时间</dt><dd><time dateTime={node.data.ideaMeta.createdAt}>{new Date(node.data.ideaMeta.createdAt).toLocaleString()}</time></dd>
+          <dt>创建时间</dt><dd><time dateTime={node.data.ideaMeta.createdAt}>{new Date(node.data.ideaMeta.createdAt).toLocaleString('zh-CN')}</time></dd>
           <dt>来源</dt><dd>{node.data.ideaMeta.sourceIdeaIds.length ? node.data.ideaMeta.sourceIdeaIds.join('、') : '直接创建'}</dd>
           <dt>修改记录</dt><dd>版本 {node.data.ideaMeta.versions.length + 1}</dd></dl>
-        {node.data.ideaMeta.versions.map((version, index) => <p key={index}>{members.find((member) => member.id === version.authorId)?.name ?? version.authorId} · <time dateTime={version.createdAt}>{new Date(version.createdAt).toLocaleString()}</time></p>)}
+        {node.data.ideaMeta.versions.map((version, index) => <p key={index}>{members.find((member) => member.id === version.authorId)?.name ?? version.authorId} · <time dateTime={version.createdAt}>{new Date(version.createdAt).toLocaleString('zh-CN')}</time></p>)}
       </section>}
 
       {!minimized && activeTab === 'content' && (isArtifact ? (
         <>
           <div className="spec-summary">
-            <div><span>Type</span><strong>{node.data.artifact!.artifactType}</strong></div>
-            <div><span>Fields</span><strong>{node.data.artifact!.fields.length}</strong></div>
-            <div><span>Records</span><strong>{node.data.artifact!.records.length}</strong></div>
+            <div><span>类型</span><strong>{node.data.artifact!.artifactType}</strong></div>
+            <div><span>字段</span><strong>{node.data.artifact!.fields.length}</strong></div>
+            <div><span>记录</span><strong>{node.data.artifact!.records.length}</strong></div>
           </div>
           <div className="field-block">
-            <label>Artifact Spec 1.0</label>
+            <label>成果结构说明 1.0</label>
             <div className="spec-code">
               {node.data.artifact!.fields.map((field) => (
                 <div key={field.key}><code>{field.key}</code><span>{field.type}</span></div>
               ))}
             </div>
-            <p className="field-help">Agents can read this schema and update its primitive records without guessing the layout.</p>
+            <p className="field-help">智能体可读取此结构并更新记录，无需猜测布局。</p>
           </div>
           <button type="button" className="secondary-button full-width" onClick={() => onCopySpec(node.id)}>
-            <BracketsCurly size={17} />Copy JSON spec
+            <BracketsCurly size={17} />复制 JSON 结构
           </button>
         </>
       ) : (
         <>
           <div className="field-block">
-            <label htmlFor="element-title">Title</label>
+            <label htmlFor="element-title">标题</label>
             <input
               id="element-title"
               value={node.data.title}
@@ -92,7 +92,7 @@ export function Inspector({ node, members = [], minimized, onToggleMinimized, on
             />
           </div>
           <div className="field-block">
-            <label htmlFor="element-body">Details</label>
+            <label htmlFor="element-body">详情</label>
             <textarea
               id="element-body"
               value={node.data.body}
@@ -104,7 +104,7 @@ export function Inspector({ node, members = [], minimized, onToggleMinimized, on
           </div>
           {node.data.kind !== 'frame' && (
             <div className="field-block">
-              <label>Color</label>
+              <label>颜色</label>
               <div className="color-options">
                 {COLORS.map((color) => (
                   <button
@@ -112,7 +112,7 @@ export function Inspector({ node, members = [], minimized, onToggleMinimized, on
                     key={color}
                     className={`color-option color-${color} ${node.data.color === color ? 'is-selected' : ''}`}
                     onClick={() => { onUpdate(node.id, { color }); onCommit(node.id, `color changed to ${color}`) }}
-                    aria-label={`Use ${color} color`}
+                    aria-label={`使用 ${({ paper: '纸白', sun: '暖黄', mint: '薄荷绿', sky: '天蓝', rose: '玫瑰粉' } as const)[color]}颜色`}
                     aria-pressed={node.data.color === color}
                   />
                 ))}
@@ -127,25 +127,25 @@ export function Inspector({ node, members = [], minimized, onToggleMinimized, on
               onUpdate(node.id, { votes: node.data.votes + 1 })
               onCommit(node.id, 'vote added')
             }}>
-              <ThumbsUp size={17} weight={hasVoted ? 'fill' : 'bold'} />{hasVoted ? 'Voted' : 'Add vote'} <span>{node.data.votes}</span>
+              <ThumbsUp size={17} weight={hasVoted ? 'fill' : 'bold'} />{hasVoted ? '已投票' : '投票'} <span>{node.data.votes}</span>
             </button>
           )}
         </>
       ))}
 
       {!minimized && activeTab === 'content' && <div className="field-block layer-controls">
-        <div className="layer-heading"><label>Layer</label><span>z {node.zIndex ?? 0}</span></div>
+        <div className="layer-heading"><label>层级</label><span>z {node.zIndex ?? 0}</span></div>
         <div className="layer-button-grid">
-          <button type="button" onClick={() => onLayer('front')}><Stack size={16} />To front</button>
-          <button type="button" onClick={() => onLayer('forward')}><ArrowUp size={16} />Forward</button>
-          <button type="button" onClick={() => onLayer('backward')}><ArrowDown size={16} />Backward</button>
-          <button type="button" onClick={() => onLayer('back')}><Stack size={16} />To back</button>
+          <button type="button" onClick={() => onLayer('front')}><Stack size={16} />置于最前</button>
+          <button type="button" onClick={() => onLayer('forward')}><ArrowUp size={16} />上移一层</button>
+          <button type="button" onClick={() => onLayer('backward')}><ArrowDown size={16} />下移一层</button>
+          <button type="button" onClick={() => onLayer('back')}><Stack size={16} />置于最后</button>
         </div>
-        <p className="field-help">Right-click any element for the same controls.</p>
+        <p className="field-help">右键单击元素也可调整层级。</p>
       </div>}
 
       {!minimized && activeTab === 'comments' && <section className="element-comments is-tab-panel">
-        <div className="element-comments-heading"><ChatCircleText size={15} /><strong>Comments</strong><span>{comments.length}</span></div>
+        <div className="element-comments-heading"><ChatCircleText size={15} /><strong>评论</strong><span>{comments.length}</span></div>
         {comments.length > 0 && <div className="element-comment-list">{[...comments].reverse().slice(0, 6).map((item) => (
           <article key={item.id}><strong>{item.participantName}</strong><span>{item.kind}</span><p>{item.content}</p></article>
         ))}</div>}
@@ -156,15 +156,15 @@ export function Inspector({ node, members = [], minimized, onToggleMinimized, on
           onComment(content)
           setComment('')
         }}>
-          <input value={comment} onChange={(event) => setComment(event.target.value)} maxLength={2000} placeholder="Comment on this element" aria-label="Comment on this element" />
-          <button type="submit" disabled={!comment.trim()} aria-label="Add comment"><PaperPlaneTilt size={15} weight="fill" /></button>
+          <input value={comment} onChange={(event) => setComment(event.target.value)} maxLength={2000} placeholder="评论此元素" aria-label="评论此元素" />
+          <button type="submit" disabled={!comment.trim()} aria-label="添加评论"><PaperPlaneTilt size={15} weight="fill" /></button>
         </form>
-        <p className="field-help">Visible here and in the global conversation.</p>
+        <p className="field-help">评论将在这里和共享讨论中显示。</p>
       </section>}
 
       {!minimized && activeTab === 'content' && <div className="inspector-actions">
-        <button type="button" className="secondary-button" onClick={() => onDuplicate(node.id)}><Copy size={17} />Duplicate</button>
-        <button type="button" className="danger-button" onClick={() => onDelete(node.id)}><Trash size={17} />Delete</button>
+        <button type="button" className="secondary-button" onClick={() => onDuplicate(node.id)}><Copy size={17} />复制</button>
+        <button type="button" className="danger-button" onClick={() => onDelete(node.id)}><Trash size={17} />删除</button>
       </div>}
     </aside>
   )

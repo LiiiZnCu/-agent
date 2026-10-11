@@ -16,22 +16,22 @@ import { AGENT_COLOR_HEX } from '../lib/recording'
 import type { AgentColor, ArtifactField, ArtifactSpec, ArtifactValue, BoardNode, ElementKind } from '../types'
 
 const KIND_META: Record<ElementKind, { label: string; icon: typeof Lightbulb }> = {
-  idea: { label: 'Idea', icon: Lightbulb },
-  question: { label: 'Question', icon: QuestionMark },
-  insight: { label: 'Insight', icon: MagnifyingGlass },
-  action: { label: 'Action', icon: CheckCircle },
-  frame: { label: 'Cluster', icon: FrameCorners },
-  artifact: { label: 'Artifact', icon: Table },
+  idea: { label: '观点', icon: Lightbulb },
+  question: { label: '问题', icon: QuestionMark },
+  insight: { label: '洞察', icon: MagnifyingGlass },
+  action: { label: '行动', icon: CheckCircle },
+  frame: { label: '分类框', icon: FrameCorners },
+  artifact: { label: '结构化成果', icon: Table },
 }
 
 function formatValue(value: ArtifactValue, field: ArtifactField) {
   if (field.type === 'boolean') {
-    return value ? <Check weight="bold" aria-label="Complete" /> : <span className="artifact-empty-check" aria-label="Not complete" />
+    return value ? <Check weight="bold" aria-label="已完成" /> : <span className="artifact-empty-check" aria-label="未完成" />
   }
-  if (value === null || value === undefined || value === '') return <span className="artifact-empty">Empty</span>
+  if (value === null || value === undefined || value === '') return <span className="artifact-empty">空</span>
   if (field.type === 'status' || field.type === 'tag') return <span className="artifact-tag">{String(value)}</span>
   if (field.type === 'url' && typeof value === 'string' && /^https?:\/\//.test(value)) {
-    return <a href={value} target="_blank" rel="noreferrer" className="artifact-link">Open</a>
+    return <a href={value} target="_blank" rel="noreferrer" className="artifact-link">打开</a>
   }
   return String(value)
 }
@@ -45,7 +45,7 @@ function ArtifactView({ spec }: { spec: ArtifactSpec }) {
     .filter((field): field is ArtifactField => Boolean(field))
 
   if (!spec.records.length) {
-    return <div className="artifact-empty-state">No records yet. An agent can add structured data.</div>
+    return <div className="artifact-empty-state">暂无记录。智能体可以添加结构化数据。</div>
   }
 
   if (spec.presentation.layout === 'grid') {
@@ -112,7 +112,7 @@ export function BoardElement({ data, selected }: NodeProps<BoardNode>) {
       style={focus ? { '--agent-focus-color': AGENT_COLOR_HEX[focus.color] } as CSSProperties : undefined}
       data-testid={`board-element-${data.kind}`}
     >
-      {focus && <div className="agent-focus-badge" title={focus.intent}><span />{focus.participantName} {focus.state === 'editing' ? 'is editing' : 'is reviewing'}</div>}
+      {focus && <div className="agent-focus-badge" title={focus.intent}><span />{focus.participantName} {focus.state === 'editing' ? '正在编辑' : '正在查看'}</div>}
       <NodeResizer
         color="#f06449"
         isVisible={selected}
@@ -124,7 +124,7 @@ export function BoardElement({ data, selected }: NodeProps<BoardNode>) {
       <header className="element-header">
         <span className="element-kind"><Icon size={14} weight="bold" />{meta.label}</span>
         {isArtifact ? (
-          <span className="artifact-spec-label"><BracketsCurly size={13} /> Spec 1.0</span>
+          <span className="artifact-spec-label"><BracketsCurly size={13} />结构说明 1.0</span>
         ) : data.cluster ? <span className="element-cluster">{data.cluster}</span> : null}
       </header>
 
@@ -135,7 +135,7 @@ export function BoardElement({ data, selected }: NodeProps<BoardNode>) {
               <h3>{data.artifact!.title}</h3>
               {data.artifact!.description && <p>{data.artifact!.description}</p>}
             </div>
-            <span className="artifact-count">{data.artifact!.records.length} records</span>
+            <span className="artifact-count">{data.artifact!.records.length} 条记录</span>
           </div>
           <ArtifactView spec={data.artifact!} />
         </>
@@ -148,7 +148,7 @@ export function BoardElement({ data, selected }: NodeProps<BoardNode>) {
               <span className={data.votes > 0 ? 'vote-count has-votes' : 'vote-count'}>
                 <ThumbsUp size={14} weight={data.votes > 0 ? 'fill' : 'regular'} /> {data.votes}
               </span>
-              {data.kind === 'insight' && <Sparkle size={14} weight="fill" aria-label="Highlighted insight" />}
+              {data.kind === 'insight' && <Sparkle size={14} weight="fill" aria-label="重点洞察" />}
             </footer>
           )}
         </>

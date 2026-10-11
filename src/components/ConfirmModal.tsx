@@ -26,7 +26,7 @@ export function ConfirmModal({ title, description, confirmLabel, onConfirm, onCa
   }, [])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    // Keep modal keystrokes from reaching the workspace's global shortcuts.
+    // 阻止弹窗按键触发工作区的全局快捷键。
     event.stopPropagation()
 
     if (event.key === 'Escape') {
@@ -73,12 +73,12 @@ export function ConfirmModal({ title, description, confirmLabel, onConfirm, onCa
         tabIndex={-1}
       >
         <div className="confirm-modal-icon"><WarningCircle size={22} weight="fill" /></div>
-        <button type="button" className="icon-button confirm-modal-close" onClick={onCancel} aria-label="Close dialog"><X size={17} /></button>
-        <span className="panel-kicker">Please confirm</span>
+        <button type="button" className="icon-button confirm-modal-close" onClick={onCancel} aria-label="关闭弹窗"><X size={17} /></button>
+        <span className="panel-kicker">请确认</span>
         <h2 id={titleId}>{title}</h2>
         <p id={descriptionId}>{description}</p>
         <div className="confirm-modal-actions">
-          <button ref={cancelButtonRef} type="button" className="secondary-button" onClick={onCancel}>Cancel</button>
+          <button ref={cancelButtonRef} type="button" className="secondary-button" onClick={onCancel}>取消</button>
           <button type="button" className="confirm-action-button" onClick={onConfirm}>{confirmLabel}</button>
         </div>
       </section>
