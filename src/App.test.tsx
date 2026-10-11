@@ -556,7 +556,7 @@ describe('讨论入口', () => {
     createDiscussion()
     addProposal()
     fireEvent.click(screen.getByRole('button', { name: '复制' }))
-    const copy = screen.getByRole('region', { name: '方案：成员填写的方案 copy' })
+    const copy = screen.getByRole('region', { name: '方案：成员填写的方案（副本）' })
     fireEvent.change(within(copy).getByLabelText('评论内容'), { target: { value: '副本的新评论' } })
     fireEvent.click(within(copy).getByRole('button', { name: '添加方案评论' }))
     expect(within(copy).getByText('副本的新评论')).toBeTruthy()
@@ -571,7 +571,7 @@ describe('讨论入口', () => {
     expect(screen.getByText('副本评分理由', { selector: 'p' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '成果输出' }))
     const final = screen.getByLabelText('最终方案') as HTMLSelectElement
-    expect(final.options[1].textContent).toBe('成员填写的方案 copy')
+    expect(final.options[1].textContent).toBe('成员填写的方案（副本）')
     fireEvent.change(final, { target: { value: final.options[1].value } })
     fireEvent.change(screen.getByLabelText('成果草稿'), { target: { value: '采用副本的成果' } })
     fireEvent.click(screen.getByRole('button', { name: '确认最终结果' }))

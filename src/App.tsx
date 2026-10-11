@@ -100,7 +100,7 @@ function Workspace() {
     if (!requestedId) return loadBoard(createEmptyBoard())
     const local = loadBoardById(requestedId)
     if (local) return local
-    const placeholder = createEmptyBoard('Opening shared mural')
+    const placeholder = createEmptyBoard('正在打开共享白板')
     return { ...placeholder, id: requestedId }
   })
   const [showCreation, setShowCreation] = useState(fresh)
@@ -325,7 +325,7 @@ function Workspace() {
       label,
       detail,
       source,
-      actorName: source === 'agent' ? 'Canvas Relay' : source === 'human' ? member?.name : 'System',
+      actorName: source === 'agent' ? '代理' : source === 'human' ? member?.name : '系统',
       createdAt: new Date().toISOString(),
       relatedElementIds,
     }
@@ -334,7 +334,7 @@ function Workspace() {
     if (recordInTrace && source !== 'agent' && activeRecording?.status === 'recording' && (source !== 'human' || member)) {
       const participant = source === 'human'
           ? currentHuman()
-          : { id: 'canvas-relay', name: 'Canvas Relay', role: 'system' as const }
+          : { id: 'canvas-relay', name: '系统', role: 'system' as const }
       const next = appendEvent(activeRecording, {
         participantId: participant.id,
         participantName: participant.name,
@@ -436,7 +436,7 @@ function Workspace() {
     sessionRef.current = previous.discussion
     setSession(previous.discussion)
     setHistoryStatus({ canUndo: historyRef.current.length > 0, canRedo: true })
-    reportActivity('Undo', 'Restored the previous board state', 'human')
+    reportActivity('撤销', '已恢复到上一个白板状态', 'human')
   }, [applySnapshot, reportActivity, snapshotNow])
 
   const redo = useCallback(() => {
@@ -447,7 +447,7 @@ function Workspace() {
     sessionRef.current = next.discussion
     setSession(next.discussion)
     setHistoryStatus({ canUndo: true, canRedo: futureRef.current.length > 0 })
-    reportActivity('Redo', 'Reapplied the board change', 'human')
+    reportActivity('重做', '已重新应用白板更改', 'human')
   }, [applySnapshot, reportActivity, snapshotNow])
 
   const commitNodes = useCallback((next: BoardNode[]) => {
@@ -529,12 +529,12 @@ function Workspace() {
       setSession(nextDiscussion)
     }
     setSelectedId(node.id)
-    reportActivity('Element added', node.data.title, source, [node.id])
+    reportActivity('已添加元素', node.data.title, source, [node.id])
     return node
   }, [commitNodes, getCenterPosition, recordHistory, reportActivity])
 
   const addElements = useCallback((items: AddElementInput[], source: Activity['source'] = 'agent') => {
-    if (!items.length) throw new Error('At least one element is required.')
+    if (!items.length) throw new Error('至少需要一个元素。')
     recordHistory()
     const origin = getCenterPosition()
     const created = items.map((item, index) => createBoardNode(item, {
@@ -542,13 +542,13 @@ function Workspace() {
       y: origin.y + Math.floor(index / 3) * 190,
     }))
     commitNodes([...nodesRef.current, ...created])
-    reportActivity('Idea set added', `${created.length} elements created`, source, created.map((node) => node.id))
+    reportActivity('已添加一组想法', `已创建 ${created.length} 个元素`, source, created.map((node) => node.id))
     return created
   }, [commitNodes, getCenterPosition, recordHistory, reportActivity])
 
   const updateElement = useCallback<BoardActions['updateElement']>((id, patch, source = 'human') => {
     const existing = nodesRef.current.find((node) => node.id === id)
-    if (!existing) throw new Error(`Element ${id} was not found.`)
+    if (!existing) throw new Error(`未找到元素 ${id}。`)
     recordHistory()
     const cleanData = Object.fromEntries(Object.entries(patch).filter(([key, value]) => value !== undefined && key !== 'x' && key !== 'y'))
     const updated: BoardNode = {
@@ -565,7 +565,7 @@ function Workspace() {
     if (contentChanged && updated.data.ideaMeta && sessionRef.current) updated.data.ideaMeta = updateIdeaMeta(updated.data.ideaMeta, sessionRef.current.currentMemberId, new Date().toISOString())
     commitNodes(nodesRef.current.map((node) => node.id === id ? updated : node))
     reviseDiscussionNode(updated)
-    reportActivity('Element updated', updated.data.title, source, [updated.id])
+    reportActivity('已更新元素', updated.data.title, source, [updated.id])
     return updated
   }, [commitNodes, recordHistory, reportActivity, reviseDiscussionNode])
 
@@ -579,22 +579,22 @@ function Workspace() {
     sessionRef.current = remaining.session
     setSession(remaining.session)
     setSelectedId((current) => current && validIds.has(current) ? null : current)
-    reportActivity('Elements removed', `${validIds.size} deleted`, source)
+    reportActivity('已删除元素', `已删除 ${validIds.size} 个`, source)
     return validIds.size
   }, [commitEdges, commitNodes, recordHistory, reportActivity])
 
   const connectElements = useCallback<BoardActions['connectElements']>((sourceId, targetId, label, source = 'human') => {
-    if (!nodesRef.current.some((node) => node.id === sourceId)) throw new Error(`Source element ${sourceId} was not found.`)
-    if (!nodesRef.current.some((node) => node.id === targetId)) throw new Error(`Target element ${targetId} was not found.`)
+    if (!nodesRef.current.some((node) => node.id === sourceId)) throw new Error(`未找到来源元素 ${sourceId}。`)
+    if (!nodesRef.current.some((node) => node.id === targetId)) throw new Error(`未找到目标元素 ${targetId}。`)
     recordHistory()
     const edge = createBoardEdge(sourceId, targetId, label)
     commitEdges(addEdge(edge, edgesRef.current))
-    reportActivity('Elements connected', label || 'New relationship', source, [sourceId, targetId])
+    reportActivity('已连接元素', label || '新关系', source, [sourceId, targetId])
     return edge
   }, [commitEdges, recordHistory, reportActivity])
 
   const renameMural = useCallback<BoardActions['renameMural']>((nextName, source = 'human') => {
-    const clean = nextName.trim().slice(0, 80) || 'Untitled brainstorm'
+    const clean = nextName.trim().slice(0, 80) || '未命名讨论'
     if (clean === nameRef.current) {
       setNameDraft(clean)
       return snapshotNow()
@@ -605,7 +605,7 @@ function Workspace() {
     setName(clean)
     setNameDraft(clean)
     setSaveState('saving')
-    reportActivity('Mural renamed', `${previous} → ${clean}`, source)
+    reportActivity('已重命名白板', `${previous} → ${clean}`, source)
     return { ...snapshotNow(), name: clean }
   }, [recordHistory, reportActivity, snapshotNow])
 
@@ -613,7 +613,7 @@ function Workspace() {
     recordHistory()
     const next = arrangeNodes(nodesRef.current, layout)
     commitNodes(next)
-    reportActivity('Board arranged', `${layout} layout applied`, source, next.filter((node) => node.data.kind !== 'frame').slice(0, 12).map((node) => node.id))
+    reportActivity('已排列白板', `已应用${layout}布局`, source, next.filter((node) => node.data.kind !== 'frame').slice(0, 12).map((node) => node.id))
     window.setTimeout(() => flowRef.current?.fitView({ padding: 0.18, duration: 450 }), 30)
   }, [commitNodes, recordHistory, reportActivity])
 
@@ -622,13 +622,13 @@ function Workspace() {
     recordHistory()
     const arranged = arrangeGroupNodes(nodesRef.current, uniqueIds, layout)
     const bounds = calculateClusterBounds(arranged, uniqueIds)
-    const frame = createBoardNode({ title: clusterName, body: `${uniqueIds.length} related elements`, kind: 'frame', color: 'paper', x: bounds.x, y: bounds.y })
+    const frame = createBoardNode({ title: clusterName, body: `${uniqueIds.length} 个关联元素`, kind: 'frame', color: 'paper', x: bounds.x, y: bounds.y })
     frame.style = { width: bounds.width, height: bounds.height }
     const members = arranged.map((node) => uniqueIds.includes(node.id)
       ? { ...node, data: { ...node.data, cluster: clusterName } }
       : node)
     commitNodes([frame, ...members])
-    reportActivity('Cluster created', `${clusterName}, ${layout === 'none' ? 'kept positions' : `${layout} layout`}`, source, [frame.id, ...uniqueIds])
+    reportActivity('已创建分类', `${clusterName}，${layout === 'none' ? '保留原位置' : `已应用${layout}布局`}`, source, [frame.id, ...uniqueIds])
     return frame
   }, [commitNodes, recordHistory, reportActivity])
 
@@ -642,31 +642,31 @@ function Workspace() {
     const next = [...nodesRef.current, node]
     commitNodes(next)
     setSelectedId(node.id)
-    reportActivity('Artifact created', `${spec.title}, ${spec.records.length} records`, source, [node.id])
+    reportActivity('已创建结构化内容', `${spec.title}，${spec.records.length} 条记录`, source, [node.id])
     return node
   }, [commitNodes, getCenterPosition, recordHistory, reportActivity])
 
   const getArtifactSpec = useCallback((id: string): ArtifactSpec => {
     const node = nodesRef.current.find((candidate) => candidate.id === id)
-    if (!node?.data.artifact) throw new Error(`Artifact ${id} was not found.`)
+    if (!node?.data.artifact) throw new Error(`未找到结构化内容 ${id}。`)
     return structuredClone(node.data.artifact)
   }, [])
 
   const updateArtifactRecords = useCallback<BoardActions['updateArtifactRecords']>((id, records, mode = 'replace', source = 'agent') => {
     const existing = nodesRef.current.find((node) => node.id === id)
-    if (!existing?.data.artifact) throw new Error(`Artifact ${id} was not found.`)
+    if (!existing?.data.artifact) throw new Error(`未找到结构化内容 ${id}。`)
     const nextRecords = mode === 'append' ? [...existing.data.artifact.records, ...records] : records
     const artifact = validateArtifactSpec({ ...existing.data.artifact, records: nextRecords })
     recordHistory()
     const updated = { ...existing, data: { ...existing.data, artifact, title: artifact.title, justCreated: source === 'agent' } }
     commitNodes(nodesRef.current.map((node) => node.id === id ? updated : node))
-    reportActivity('Artifact data updated', `${artifact.records.length} total records`, source, [updated.id])
+    reportActivity('已更新结构化内容', `共 ${artifact.records.length} 条记录`, source, [updated.id])
     return updated
   }, [commitNodes, recordHistory, reportActivity])
 
   const focusElements = useCallback((ids: string[]) => {
     const valid = nodesRef.current.filter((node) => ids.includes(node.id))
-    if (!valid.length) throw new Error('None of the requested elements were found.')
+    if (!valid.length) throw new Error('未找到请求的元素。')
     commitNodes(nodesRef.current.map((node) => ({ ...node, selected: ids.includes(node.id) })))
     setSelectedId(valid[0].id)
     flowRef.current?.fitView({ nodes: valid, padding: 0.35, duration: 450 })
@@ -681,12 +681,12 @@ function Workspace() {
 
   const setElementLayer = useCallback<BoardActions['setElementLayer']>((id, action, source = 'human') => {
     const existing = nodesRef.current.find((node) => node.id === id)
-    if (!existing) throw new Error(`Element ${id} was not found.`)
+    if (!existing) throw new Error(`未找到元素 ${id}。`)
     recordHistory()
     const next = moveNodeLayer(nodesRef.current, id, action)
     commitNodes(next)
     const updated = next.find((node) => node.id === id)!
-    const labels: Record<LayerAction, string> = { front: 'Brought to front', forward: 'Brought forward', backward: 'Sent backward', back: 'Sent to back' }
+    const labels: Record<LayerAction, string> = { front: '已置于顶层', forward: '已上移一层', backward: '已下移一层', back: '已置于底层' }
     reportActivity(labels[action], existing.data.title, source, [id])
     setLayerMenu(null)
     return updated
@@ -697,7 +697,7 @@ function Workspace() {
     commitNodes([])
     commitEdges([])
     setSelectedId(null)
-    reportActivity('Board cleared', 'All elements removed', source)
+    reportActivity('已清空白板', '已删除全部元素', source)
   }, [commitEdges, commitNodes, recordHistory, reportActivity])
 
   const createHostedMural = useCallback<BoardActions['createHostedMural']>(async (title, initialBoard) => {
@@ -742,7 +742,7 @@ function Workspace() {
     setSession(hostedDiscussion)
     saveBrainstormBoard(hosted.board, hostedDiscussion)
     setBoardList(listBoards())
-    announce('Hosted mural created with separate user and agent access')
+    announce('已创建托管白板，并分别生成用户和代理访问方式。')
     return hosted
   }, [announce, applySnapshot, snapshotNow])
 
@@ -778,7 +778,7 @@ function Workspace() {
       }
     } else {
       const current = recordingRef.current
-      if (!current) throw new Error('No decision trace is active.')
+      if (!current) throw new Error('当前没有进行中的讨论记录。')
       const next = setRecordingFocus(current, participant.id, focus)
       recordingRef.current = next
       setRecording(next)
@@ -789,13 +789,13 @@ function Workspace() {
 
   const assertAgentWritableAction = useCallback<BoardActions['assertAgentWritable']>(async (participantId, elementIds) => {
     const localConflict = getAgentFocus().find((claim) => claim.participantId !== participantId && claim.state === 'editing' && claim.elementIds.some((id) => elementIds.includes(id)))
-    if (localConflict) throw new Error(`${localConflict.participantName} is editing one of those elements until ${localConflict.leaseExpiresAt}.`)
+    if (localConflict) throw new Error(`${localConflict.participantName} 正在编辑其中一个元素，锁定将持续到 ${localConflict.leaseExpiresAt}。`)
     if (hostedAccessToken && hostedReadyRef.current) await assertHostedWritable(boardIdRef.current, hostedAccessToken, participantId, elementIds)
   }, [getAgentFocus, hostedAccessToken])
 
   const createAgentInvites = useCallback<BoardActions['createAgentInvites']>(async (muralId, ownerToken, guests) => {
     const invitations = await createHostedAgentInvites(muralId, ownerToken, guests)
-    announce(`${invitations.length} agent invitations created`)
+    announce(`已创建 ${invitations.length} 个代理邀请。`)
     return invitations
   }, [announce])
 
@@ -851,11 +851,11 @@ function Workspace() {
   const startRecording = useCallback<RecordingActions['startRecording']>((title, actor) => {
     const recordingActor = actor?.role === 'agent' ? actor : currentHuman(actor?.id)
     if (recordingRef.current?.status === 'recording' && recordingRef.current.boardId === boardIdRef.current) return recordingRef.current
-    const session = createRecordingSession(title || `${nameRef.current} decision trace`, recordingActor, boardIdRef.current)
+    const session = createRecordingSession(title || `${nameRef.current} 讨论记录`, recordingActor, boardIdRef.current)
     recordingRef.current = session
     setRecording(session)
     const activity: Activity = {
-      id: createId('activity'), label: 'Recording started', detail: session.title, source: recordingActor.role === 'agent' ? 'agent' : 'human', createdAt: new Date().toISOString(),
+      id: createId('activity'), label: '已开始记录', detail: session.title, source: recordingActor.role === 'agent' ? 'agent' : 'human', createdAt: new Date().toISOString(),
     }
     setActivities((current) => [activity, ...current].slice(0, 30))
     return session
@@ -863,7 +863,7 @@ function Workspace() {
 
   const joinParticipant = useCallback<RecordingActions['joinParticipant']>((participant) => {
     const current = recordingRef.current
-    if (!current) throw new Error('Start a recording before joining the session.')
+    if (!current) throw new Error('请先开始记录，再加入讨论。')
     const next = joinRecording(current, participant)
     recordingRef.current = next
     setRecording(next)
@@ -872,15 +872,15 @@ function Workspace() {
 
   const recordContribution = useCallback<RecordingActions['recordContribution']>((input) => {
     let current = recordingRef.current
-    if (!current) throw new Error('Start a recording before adding contributions.')
+    if (!current) throw new Error('请先开始记录，再添加内容。')
     if (!current.participants.some((participant) => participant.id === input.agentId)) {
-      current = joinRecording(current, { id: input.agentId, name: input.agentName, role: 'agent', specialty: 'Agent contributor' })
+      current = joinRecording(current, { id: input.agentId, name: input.agentName, role: 'agent', specialty: '代理贡献者' })
     }
     if (current.participants.find((participant) => participant.id === input.agentId)?.status === 'muted') {
-      throw new Error(`${input.agentName} is muted by the session moderator.`)
+      throw new Error(`${input.agentName} 已被讨论主持人静音。`)
     }
     if (input.replyTo && !current.events.some((event) => event.id === input.replyTo)) {
-      throw new Error(`Reply target ${input.replyTo} was not found in this session.`)
+      throw new Error(`当前讨论中未找到要回复的目标 ${input.replyTo}。`)
     }
     const next = appendEvent(current, {
       participantId: input.agentId,
@@ -904,7 +904,7 @@ function Workspace() {
 
   const recordUserMessage = useCallback<RecordingActions['recordUserMessage']>((content, kind = 'question', relatedElementIds) => {
     const current = recordingRef.current
-    if (!current) throw new Error('Start a recording before adding your contribution.')
+    if (!current) throw new Error('请先开始记录，再添加你的内容。')
     const member = currentHuman()
     const next = appendEvent(current, {
       participantId: member.id,
@@ -926,7 +926,7 @@ function Workspace() {
 
   const moderateParticipant = useCallback<RecordingActions['moderateParticipant']>((participantId, muted, moderatorId) => {
     const current = recordingRef.current
-    if (!current) throw new Error('No active recording is available to moderate.')
+    if (!current) throw new Error('当前没有可管理的进行中记录。')
     const next = moderateRecording(current, participantId, muted, moderatorId)
     recordingRef.current = next
     setRecording(next)
@@ -935,7 +935,7 @@ function Workspace() {
 
   const watchParticipant = useCallback<RecordingActions['watchParticipant']>((participantId, elementIds = [], renewFocus = false) => {
     const current = recordingRef.current
-    if (!current) throw new Error('No decision trace is available to watch.')
+    if (!current) throw new Error('当前没有可查看的讨论记录。')
     const next = watchRecording(current, participantId, elementIds, renewFocus)
     recordingRef.current = next
     setRecording(next)
@@ -944,7 +944,7 @@ function Workspace() {
 
   const setParticipantFocus = useCallback<RecordingActions['setParticipantFocus']>((participantId, focus) => {
     const current = recordingRef.current
-    if (!current) throw new Error('No decision trace is active.')
+    if (!current) throw new Error('当前没有进行中的讨论记录。')
     const next = setRecordingFocus(current, participantId, focus)
     recordingRef.current = next
     setRecording(next)
@@ -953,7 +953,7 @@ function Workspace() {
 
   const createCheckpoint = useCallback<RecordingActions['createCheckpoint']>((label, board, actor) => {
     const current = recordingRef.current
-    if (!current) throw new Error('No decision trace is active.')
+    if (!current) throw new Error('当前没有进行中的讨论记录。')
     const member = actor?.role === 'human' ? currentHuman(actor.id) : actor
     const withMember = member?.role === 'human' && !current.participants.some((participant) => participant.id === member.id)
       ? joinRecording(current, member)
@@ -967,7 +967,7 @@ function Workspace() {
 
   const updateCheckpoint = useCallback<RecordingActions['updateCheckpoint']>((eventId, label) => {
     const current = recordingRef.current
-    if (!current) throw new Error('No decision trace is active.')
+    if (!current) throw new Error('当前没有进行中的讨论记录。')
     const next = renameRecordingCheckpoint(current, eventId, label)
     recordingRef.current = next
     setRecording(next)
@@ -976,7 +976,7 @@ function Workspace() {
 
   const removeCheckpoint = useCallback<RecordingActions['removeCheckpoint']>((eventId) => {
     const current = recordingRef.current
-    if (!current) throw new Error('No decision trace is active.')
+    if (!current) throw new Error('当前没有进行中的讨论记录。')
     const next = deleteRecordingCheckpoint(current, eventId)
     recordingRef.current = next
     setRecording(next)
@@ -986,7 +986,7 @@ function Workspace() {
 
   const finalizeRecording = useCallback<RecordingActions['finalizeRecording']>((finalOutput, actor) => {
     const current = recordingRef.current
-    if (!current) throw new Error('No recording is active.')
+    if (!current) throw new Error('当前没有进行中的记录。')
     if (current.status === 'complete') return current
     const member = actor?.role === 'agent' ? actor : currentHuman(actor?.id)
     const withMember = member.role === 'human' && !current.participants.some((participant) => participant.id === member.id)
@@ -996,7 +996,7 @@ function Workspace() {
     recordingRef.current = next
     setRecording(next)
     const activity: Activity = {
-      id: createId('activity'), label: 'Recording finalized', detail: `${next.events.length} events preserved`, source: actor?.role === 'agent' ? 'agent' : 'human', createdAt: next.completedAt!,
+      id: createId('activity'), label: '已结束记录', detail: `已保留 ${next.events.length} 条事件`, source: actor?.role === 'agent' ? 'agent' : 'human', createdAt: next.completedAt!,
     }
     setActivities((activities) => [activity, ...activities].slice(0, 30))
     return next
@@ -1051,9 +1051,10 @@ function Workspace() {
       setBoardList(listBoards())
       recordingRef.current = hosted.session
       setRecording(hosted.session)
-      announce(`Connected to hosted mural as ${hosted.role}`)
+      const role = hosted.role === 'owner' ? '所有者' : hosted.role === 'agent' ? '代理' : '协作者'
+      announce(`已连接到托管白板，身份：${role}`)
     }).catch((error) => {
-      if (active) announce(error instanceof Error ? error.message : 'Could not open the hosted mural')
+      if (active) announce(error instanceof Error ? error.message : '无法打开托管白板。')
     })
     return () => { active = false }
   }, [announce, applySnapshot, hostedAccessToken])
@@ -1285,7 +1286,7 @@ function Workspace() {
     changes.forEach((change) => {
       if (change.type === 'dimensions' && change.resizing === false) {
         const node = next.find((candidate) => candidate.id === change.id)
-        if (node) reportActivity('Element resized', node.data.title, 'human', [node.id])
+        if (node) reportActivity('已调整元素大小', node.data.title, 'human', [node.id])
       }
     })
   }, [commitNodes, reportActivity])
@@ -1326,7 +1327,7 @@ function Workspace() {
   const commitInspectorChange = useCallback((id: string, field: string) => {
     const node = nodesRef.current.find((candidate) => candidate.id === id)
     if (!node) return
-    reportActivity('Element updated', `${node.data.title}: ${field}`, 'human', [id])
+    reportActivity('已更新元素', `${node.data.title}：${field}`, 'human', [id])
   }, [reportActivity])
 
   const duplicateElement = useCallback((id: string) => {
@@ -1338,7 +1339,7 @@ function Workspace() {
       id: createId(existing.data.kind),
       position: { x: existing.position.x + 36, y: existing.position.y + 36 },
       selected: true,
-      data: { ...structuredClone(existing.data), title: `${existing.data.title} copy`, justCreated: true },
+      data: { ...structuredClone(existing.data), title: `${existing.data.title}（副本）`, justCreated: true },
     }
     if (session && existing.data.ideaMeta) duplicate.data.ideaMeta = createIdeaMeta({ sessionId: session.id, authorId: session.currentMemberId, type: existing.data.ideaMeta.type, sourceIdeaIds: [id], createdAt: new Date().toISOString() })
     commitNodes([...nodesRef.current.map((node): BoardNode => ({ ...node, selected: false })), duplicate])
@@ -1349,7 +1350,7 @@ function Workspace() {
       setSession(nextDiscussion)
     }
     setSelectedId(duplicate.id)
-    reportActivity('Element duplicated', duplicate.data.title, 'human', [duplicate.id])
+    reportActivity('已复制元素', duplicate.data.title, 'human', [duplicate.id])
   }, [commitNodes, recordHistory, reportActivity, session])
 
   useEffect(() => {
@@ -1407,7 +1408,7 @@ function Workspace() {
   const copyArtifactSpec = useCallback(async (id: string) => {
     const spec = getArtifactSpec(id)
     await navigator.clipboard.writeText(JSON.stringify(spec, null, 2))
-    announce('Artifact spec copied')
+    announce('已复制结构化内容规格。')
   }, [announce, getArtifactSpec])
 
   const newBoard = useCallback(() => {
@@ -1423,15 +1424,15 @@ function Workspace() {
     setHistoryStatus({ canUndo: false, canRedo: false })
     saveBrainstormBoard(board, null)
     setBoardList(listBoards())
-    reportActivity('New board', 'Started with an empty canvas', 'human')
-    announce('New mural created')
+    reportActivity('新建白板', '已从空白画布开始', 'human')
+    announce('已创建新白板。')
   }, [announce, applySnapshot, clearHostedAccess, reportActivity, snapshotNow])
 
   const switchBoard = useCallback((id: string) => {
     if (id === boardIdRef.current) return
     saveBrainstormBoard(snapshotNow(), sessionRef.current)
     const board = loadBoardById(id)
-    if (!board) return announce('That mural is no longer available')
+    if (!board) return announce('该白板已不可用。')
     clearHostedAccess()
     applySnapshot(board)
     sessionRef.current = loadBrainstorm(board)
@@ -1443,7 +1444,7 @@ function Workspace() {
     historyRef.current = []
     futureRef.current = []
     setHistoryStatus({ canUndo: false, canRedo: false })
-    announce(`Opened ${board.name}`)
+    announce(`已打开「${board.name}」。`)
   }, [announce, applySnapshot, clearHostedAccess, snapshotNow])
 
   const openBoardInstance = useCallback((id: string) => {
@@ -1465,9 +1466,9 @@ function Workspace() {
       saveRecording(imported.recording, board.id)
       setActivities([])
       setBoardList(listBoards())
-      announce(`Imported ${board.name}`)
+      announce(`已导入「${board.name}」。`)
     } catch (error) {
-      announce(error instanceof Error ? error.message : 'Could not import that mural')
+      announce(error instanceof Error ? error.message : '无法导入该白板。')
     }
   }, [announce, applySnapshot, clearHostedAccess, snapshotNow])
 
@@ -1476,10 +1477,10 @@ function Workspace() {
     const url = URL.createObjectURL(new Blob([content], { type: 'application/json' }))
     const anchor = document.createElement('a')
     anchor.href = url
-    anchor.download = `${nameRef.current.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'canvas-relay'}.json`
+    anchor.download = `${nameRef.current.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'ai-mural'}.json`
     anchor.click()
     URL.revokeObjectURL(url)
-    reportActivity('Board exported', 'Downloaded a portable JSON snapshot', 'human')
+    reportActivity('已导出白板', '已下载可移植的 JSON 快照', 'human')
   }, [reportActivity, snapshotNow])
 
   const openPanel = useCallback((view: AgentPanelView) => {
@@ -1491,19 +1492,19 @@ function Workspace() {
   const sendUserMessage = useCallback((content: string) => {
     try {
       currentHuman()
-      if (recordingRef.current?.status !== 'recording') startRecording(`${nameRef.current} decision trace`)
+      if (recordingRef.current?.status !== 'recording') startRecording(`${nameRef.current} 讨论记录`)
       recordUserMessage(content, 'question')
       openPanel('stream')
-      announce('Message added to the shared stream')
+      announce('消息已发送到共享对话。')
     } catch (error) { if (!(error instanceof Error)) throw error; announce(error.message) }
   }, [announce, currentHuman, openPanel, recordUserMessage, startRecording])
 
   const commentOnElement = useCallback((id: string, content: string) => {
     try {
       currentHuman()
-      if (recordingRef.current?.status !== 'recording') startRecording(`${nameRef.current} decision trace`)
+      if (recordingRef.current?.status !== 'recording') startRecording(`${nameRef.current} 讨论记录`)
       recordUserMessage(content, 'note', [id])
-      announce('Comment added to the element and global conversation')
+      announce('评论已添加到该元素和共享对话。')
     } catch (error) { if (!(error instanceof Error)) throw error; announce(error.message) }
   }, [announce, currentHuman, recordUserMessage, startRecording])
 
@@ -1515,9 +1516,9 @@ function Workspace() {
       const artifactCount = nodesRef.current.filter((node) => node.data.kind === 'artifact').length
       const decisions = current.events.filter((event) => event.kind === 'decision').length
       finalizeRecording(
-        `Session completed with ${nodesRef.current.length} visual elements, ${edgesRef.current.length} connections, ${artifactCount} structured artifacts, and ${decisions} explicit decisions.`,
+        `讨论已结束：${nodesRef.current.length} 个画布元素、${edgesRef.current.length} 条连线、${artifactCount} 个结构化内容和 ${decisions} 项明确决策。`,
       )
-      announce('Decision trace finalized and ready to export')
+      announce('讨论记录已结束，可以导出。')
     } catch (error) { if (!(error instanceof Error)) throw error; announce(error.message) }
   }, [announce, currentHuman, finalizeRecording])
 
@@ -1540,7 +1541,7 @@ function Workspace() {
     anchor.download = `${current.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'decision-trace'}.${extension}`
     anchor.click()
     URL.revokeObjectURL(url)
-    announce(`Decision trace exported as ${extension.toUpperCase()}`)
+    announce(`讨论记录已导出为 ${extension.toUpperCase()}。`)
   }, [announce, snapshotNow])
 
   const openShare = useCallback(() => {
@@ -1557,9 +1558,9 @@ function Workspace() {
     try {
       const hosted = await createHostedMural(nameRef.current, snapshotNow())
       setShareUrl(hosted.userUrl)
-      announce('Mural published. Collaborator link ready')
+      announce('白板已发布，协作者链接已准备好。')
     } catch (error) {
-      setShareError(error instanceof Error ? error.message : 'Could not publish this mural.')
+      setShareError(error instanceof Error ? error.message : '无法发布此白板。')
     } finally {
       setShareLoading(false)
     }
@@ -1572,9 +1573,9 @@ function Workspace() {
       const share = await createUserShare(boardIdRef.current, hostedAccessToken)
       setShareUrl(share.userUrl)
       setShareCopied(false)
-      announce('Fresh collaborator link created')
+      announce('已生成新的协作者链接。')
     } catch (error) {
-      setShareError(error instanceof Error ? error.message : 'Could not create a collaborator link.')
+      setShareError(error instanceof Error ? error.message : '无法创建协作者链接。')
     } finally {
       setShareLoading(false)
     }
@@ -1585,38 +1586,38 @@ function Workspace() {
     try {
       await navigator.clipboard.writeText(shareUrl)
       setShareCopied(true)
-      announce('Collaborator link copied')
+      announce('已复制协作者链接。')
     } catch {
-      setShareError('Clipboard access was unavailable. Select and copy the URL manually.')
+      setShareError('无法访问剪贴板，请手动选择并复制链接。')
     }
   }, [announce, shareUrl])
 
   const saveCurrentCheckpoint = useCallback(() => {
     try {
       const member = currentHuman()
-      if (recordingRef.current?.status !== 'recording') startRecording(`${nameRef.current} decision trace`)
+      if (recordingRef.current?.status !== 'recording') startRecording(`${nameRef.current} 讨论记录`)
       const current = recordingRef.current!
       const index = current.events.filter((event) => event.kind === 'checkpoint').length + 1
-      createCheckpoint(`Checkpoint ${index}`, snapshotNow(), member)
-      announce(`Checkpoint ${index} saved`)
+      createCheckpoint(`检查点 ${index}`, snapshotNow(), member)
+      announce(`检查点 ${index} 已保存。`)
     } catch (error) { if (!(error instanceof Error)) throw error; announce(error.message) }
   }, [announce, createCheckpoint, currentHuman, snapshotNow, startRecording])
 
   const renameCheckpointFromUI = useCallback((eventId: string, label: string) => {
     updateCheckpoint(eventId, label)
-    announce('Checkpoint renamed')
+    announce('检查点已重命名。')
   }, [announce, updateCheckpoint])
 
   const deleteCheckpointFromUI = useCallback((eventId: string) => {
-    const label = recordingRef.current?.events.find((event) => event.id === eventId)?.checkpoint?.label ?? 'this checkpoint'
+    const label = recordingRef.current?.events.find((event) => event.id === eventId)?.checkpoint?.label ?? '该检查点'
     setConfirmation({
-      title: 'Delete replay checkpoint?',
-      description: `Remove “${label}” from the timeline. The live mural will not change.`,
-      confirmLabel: 'Delete checkpoint',
+      title: '删除回放检查点？',
+      description: `从时间线中移除“${label}”。不会更改当前白板。`,
+      confirmLabel: '删除检查点',
       onConfirm: () => {
         removeCheckpoint(eventId)
         setConfirmation(null)
-        announce('Checkpoint removed')
+        announce('检查点已删除。')
       },
     })
   }, [announce, removeCheckpoint])
@@ -1685,12 +1686,12 @@ function Workspace() {
       {session && <StageNavigator key={session.id} session={session} onChange={changeDiscussion} />}
       <header className="top-bar">
         <div className="brand-lockup">
-          <div className="brand-mark header-mark" role="img" aria-label="Mural logo"><span /><span /><span /></div>
+          <div className="brand-mark header-mark" role="img" aria-label="AI-Mural 标志"><span /><span /><span /></div>
           <div className="board-title-wrap">
             <input
               value={nameDraft}
               maxLength={80}
-              aria-label="Mural name"
+              aria-label="白板名称"
               onChange={(event) => setNameDraft(event.target.value)}
               onBlur={() => renameMural(nameDraft, 'human')}
               onKeyDown={(event) => {
@@ -1710,39 +1711,39 @@ function Workspace() {
             onOpenInstance={openBoardInstance}
             onImport={handleBoardImport}
           />
-          <div className="history-controls" aria-label="History controls">
-            <button type="button" className="icon-button" onClick={undo} disabled={!historyStatus.canUndo} aria-label="Undo"><ArrowCounterClockwise size={18} /></button>
-            <button type="button" className="icon-button" onClick={redo} disabled={!historyStatus.canRedo} aria-label="Redo"><ArrowClockwise size={18} /></button>
+          <div className="history-controls" aria-label="历史记录控制">
+            <button type="button" className="icon-button" onClick={undo} disabled={!historyStatus.canUndo} aria-label="撤销"><ArrowCounterClockwise size={18} /></button>
+            <button type="button" className="icon-button" onClick={redo} disabled={!historyStatus.canRedo} aria-label="重做"><ArrowClockwise size={18} /></button>
           </div>
           <details className="top-menu">
-            <summary className="secondary-button"><Rows size={17} />Arrange<CaretDown size={13} /></summary>
+            <summary className="secondary-button"><Rows size={17} />排列<CaretDown size={13} /></summary>
             <div className="top-menu-popover">
-              <button type="button" onClick={(event) => { arrange('grid'); event.currentTarget.closest('details')?.removeAttribute('open') }}>Grid</button>
-              <button type="button" onClick={(event) => { arrange('columns'); event.currentTarget.closest('details')?.removeAttribute('open') }}>Columns by cluster</button>
-              <button type="button" onClick={(event) => { arrange('radial'); event.currentTarget.closest('details')?.removeAttribute('open') }}>Radial map</button>
-              <button type="button" onClick={(event) => { arrange('stacked'); event.currentTarget.closest('details')?.removeAttribute('open') }}>Stacked</button>
+              <button type="button" onClick={(event) => { arrange('grid'); event.currentTarget.closest('details')?.removeAttribute('open') }}>网格</button>
+              <button type="button" onClick={(event) => { arrange('columns'); event.currentTarget.closest('details')?.removeAttribute('open') }}>按分类分列</button>
+              <button type="button" onClick={(event) => { arrange('radial'); event.currentTarget.closest('details')?.removeAttribute('open') }}>放射图</button>
+              <button type="button" onClick={(event) => { arrange('stacked'); event.currentTarget.closest('details')?.removeAttribute('open') }}>堆叠</button>
               <span />
-              <button type="button" onClick={(event) => { newBoard(); event.currentTarget.closest('details')?.removeAttribute('open') }}>New blank board</button>
+              <button type="button" onClick={(event) => { newBoard(); event.currentTarget.closest('details')?.removeAttribute('open') }}>新建空白白板</button>
             </div>
           </details>
-          <button type="button" className="icon-button theme-button" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')} aria-label={`Use ${theme === 'light' ? 'dark' : 'light'} theme`}>
+          <button type="button" className="icon-button theme-button" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')} aria-label={`切换到${theme === 'light' ? '深色' : '浅色'}主题`}>
             {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
           </button>
-          <button type="button" className="secondary-button export-button" onClick={exportBoard}><DownloadSimple size={17} />Export</button>
-          <button type="button" className="secondary-button share-button" onClick={openShare}><ShareNetwork size={17} />Share</button>
+          <button type="button" className="secondary-button export-button" onClick={exportBoard}><DownloadSimple size={17} />导出</button>
+          <button type="button" className="secondary-button share-button" onClick={openShare}><ShareNetwork size={17} />分享</button>
           <button
             type="button"
             className={`record-top-button ${recording?.status === 'recording' ? 'is-recording' : ''} ${agentOpen && panelView === 'session' ? 'is-active' : ''}`}
             onClick={() => openPanel('session')}
           >
-            <Record size={13} weight="fill" />{recording?.status === 'recording' ? 'REC' : 'Trace'}
+            <Record size={13} weight="fill" />{recording?.status === 'recording' ? '录制中' : '记录'}
           </button>
           <button
             type="button"
             className={`agent-toggle ${agentOpen && panelView === 'activity' ? 'is-active' : ''}`}
             onClick={() => agentOpen && panelView === 'activity' ? setAgentOpen(false) : openPanel('activity')}
           >
-            <ClockCounterClockwise size={18} weight="bold" />Activity
+            <ClockCounterClockwise size={18} weight="bold" />动态
             <span className={webMCPState.supported ? 'connection-light ready' : 'connection-light'} aria-hidden="true" />
           </button>
         </div>
@@ -1775,7 +1776,7 @@ function Workspace() {
               setLayerMenu(null)
             }}
             onNodeDragStart={recordHistory}
-            onNodeDragStop={(_event, node) => reportActivity('Element moved', node.data.title, 'human', [node.id])}
+            onNodeDragStop={(_event, node) => reportActivity('已移动元素', node.data.title, 'human', [node.id])}
             onDoubleClickCapture={(event) => {
               if (replayBoard) return
               if ((event.target as Element).classList.contains('react-flow__pane')) {
@@ -1807,7 +1808,7 @@ function Workspace() {
             />
           </ReactFlow>
 
-          {replayBoard && <div className="replay-banner" role="status"><span>Replay</span><strong>{recording?.events.find((event) => event.id === replayCheckpointId)?.checkpoint?.label}</strong><small>{new Date(replayBoard.updatedAt).toLocaleString()}</small><button type="button" onClick={() => openReplayCheckpoint(null)}>Exit replay</button></div>}
+          {replayBoard && <div className="replay-banner" role="status"><span>回放</span><strong>{recording?.events.find((event) => event.id === replayCheckpointId)?.checkpoint?.label}</strong><small>{new Date(replayBoard.updatedAt).toLocaleString('zh-CN')}</small><button type="button" onClick={() => openReplayCheckpoint(null)}>退出回放</button></div>}
 
           <CollaborationDock
             recording={recording}
@@ -1830,21 +1831,21 @@ function Workspace() {
           {!nodes.length && (
             <div className="empty-board">
               <div className="empty-icon"><BracketsCurly size={25} weight="bold" /></div>
-              <h2>Start with one thought</h2>
-              <p>Double-click anywhere, add a structured artifact, or let an agent build the first map.</p>
+              <h2>从一个想法开始</h2>
+              <p>双击画布、添加结构化内容，或让代理搭建第一张思维图。</p>
               <div>
-                <button type="button" className="primary-button" onClick={() => addKind('idea')}>Create first idea</button>
-                <button type="button" className="secondary-button" onClick={() => openPanel('agent')}>Open agent tools</button>
+                <button type="button" className="primary-button" onClick={() => addKind('idea')}>创建第一个想法</button>
+                <button type="button" className="secondary-button" onClick={() => openPanel('agent')}>打开代理工具</button>
               </div>
             </div>
           )}
 
           <div className="canvas-status">
             <span className={`save-indicator state-${saveState}`} />
-            {saveState === 'saved' ? 'Saved locally' : saveState === 'saving' ? 'Saving' : 'Could not save'}
+            {saveState === 'saved' ? '已保存到本地' : saveState === 'saving' ? '保存中' : '保存失败'}
             <span className="status-divider" />
-            {nodes.filter((node) => node.data.kind !== 'frame').length} elements
-            <span className="shortcut-hint">Double-click canvas to add</span>
+            {nodes.filter((node) => node.data.kind !== 'frame').length} 个元素
+            <span className="shortcut-hint">双击画布添加</span>
           </div>
         </div>
 
@@ -1905,7 +1906,7 @@ function Workspace() {
         onCopy={copyShareLink}
         onClose={() => setShareOpen(false)}
       />}
-      <button type="button" className="mobile-panel-toggle" onClick={() => setAgentOpen((open) => !open)} aria-label="Toggle agent panel"><SidebarSimple size={20} /></button>
+      <button type="button" className="mobile-panel-toggle" onClick={() => setAgentOpen((open) => !open)} aria-label="切换代理面板"><SidebarSimple size={20} /></button>
     </main>
   )
 }

@@ -88,7 +88,7 @@ export function Inspector({ node, members = [], minimized, onToggleMinimized, on
               value={node.data.title}
               maxLength={120}
               onChange={(event) => onUpdate(node.id, { title: event.target.value })}
-              onBlur={() => onCommit(node.id, 'title changed')}
+              onBlur={() => onCommit(node.id, '标题已修改')}
             />
           </div>
           <div className="field-block">
@@ -99,7 +99,7 @@ export function Inspector({ node, members = [], minimized, onToggleMinimized, on
               maxLength={800}
               rows={5}
               onChange={(event) => onUpdate(node.id, { body: event.target.value })}
-              onBlur={() => onCommit(node.id, 'details changed')}
+              onBlur={() => onCommit(node.id, '详情已修改')}
             />
           </div>
           {node.data.kind !== 'frame' && (
@@ -111,7 +111,7 @@ export function Inspector({ node, members = [], minimized, onToggleMinimized, on
                     type="button"
                     key={color}
                     className={`color-option color-${color} ${node.data.color === color ? 'is-selected' : ''}`}
-                    onClick={() => { onUpdate(node.id, { color }); onCommit(node.id, `color changed to ${color}`) }}
+                    onClick={() => { onUpdate(node.id, { color }); onCommit(node.id, `颜色已改为 ${({ paper: '纸白', sun: '暖黄', mint: '薄荷绿', sky: '天蓝', rose: '玫瑰粉' } as const)[color]}`) }}
                     aria-label={`使用 ${({ paper: '纸白', sun: '暖黄', mint: '薄荷绿', sky: '天蓝', rose: '玫瑰粉' } as const)[color]}颜色`}
                     aria-pressed={node.data.color === color}
                   />
@@ -125,7 +125,7 @@ export function Inspector({ node, members = [], minimized, onToggleMinimized, on
               window.localStorage.setItem(`canvas-relay-vote:${node.id}`, 'true')
               setHasVoted(true)
               onUpdate(node.id, { votes: node.data.votes + 1 })
-              onCommit(node.id, 'vote added')
+              onCommit(node.id, '已投票')
             }}>
               <ThumbsUp size={17} weight={hasVoted ? 'fill' : 'bold'} />{hasVoted ? '已投票' : '投票'} <span>{node.data.votes}</span>
             </button>
