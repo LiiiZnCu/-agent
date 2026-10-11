@@ -6,6 +6,8 @@ import { registerWebMCP, TOOL_CATALOG } from './webmcp'
 
 type CapturedTool = {
   name: string
+  title?: string
+  description: string
   inputSchema?: Record<string, unknown>
   execute: (input: Record<string, unknown>) => Promise<unknown> | unknown
 }
@@ -40,12 +42,16 @@ describe('WebMCP registration', () => {
     expect(tools.map((tool) => tool.name)).toContain('canvas_rename_mural')
 
     const artifactTool = tools.find((tool) => tool.name === 'canvas_create_artifact')!
+    expect(artifactTool.title).toBe('创建可复用的结构化内容')
+    expect(artifactTool.description).toContain('需要已加入讨论且未被静音的智能体')
     const properties = artifactTool.inputSchema?.properties as Record<string, unknown>
     const artifactSchema = properties.spec as { properties: Record<string, unknown> }
+    expect((properties.agentToken as { description: string }).description).toBe('由 canvas_join_session 或 canvas_start_recording 返回的私密权限令牌。')
     expect(artifactSchema.properties).toHaveProperty('artifactType')
     expect(artifactSchema.properties).not.toHaveProperty('spec')
 
     const boardTool = tools.find((tool) => tool.name === 'canvas_get_board')!
+    expect(boardTool.title).toBe('读取讨论白板')
     const output = await boardTool.execute({}) as { structuredContent: { board: { name: string } } }
     expect(output.structuredContent.board.name).toBe('Test')
     registration.cleanup()
@@ -78,7 +84,8 @@ describe('WebMCP registration', () => {
 
     const created = await tools.find((tool) => tool.name === 'canvas_create_mural')!.execute({
       name: 'Launch review', creatorAgentId: 'gpt-host', creatorAgentName: 'GPT Host',
-    }) as { structuredContent: { muralId: string; ownerToken: string; userUrl: string; moderatorToken: string } }
+    }) as { structuredContent: { summary: string; muralId: string; ownerToken: string; userUrl: string; moderatorToken: string } }
+    expect(created.structuredContent.summary).toBe('已创建托管白板，并分别提供所有者、用户和智能体访问方式')
     expect(created.structuredContent.muralId).toBe('hosted-1')
     expect(created.structuredContent.ownerToken).toBe('owner-secret')
     expect(created.structuredContent.userUrl).toContain('#access=')
@@ -116,8 +123,8 @@ describe('WebMCP registration', () => {
     session = { ...session, participants: session.participants.map((participant) => ({ ...participant, status: 'muted' })) }
     const addTool = tools.find((tool) => tool.name === 'canvas_add_element')!
     expect((addTool.inputSchema?.required as string[])).toEqual(expect.arrayContaining(['muralId', 'agentId', 'agentToken']))
-    await expect(addTool.execute({ muralId: 'mural-1', agentId: 'agent-risky', agentToken: joined.structuredContent.agentToken, title: 'Unsafe idea' })).rejects.toThrow('muted')
-    await expect(addTool.execute({ muralId: 'mural-1', agentId: 'agent-risky', agentToken: 'spoofed', title: 'Unsafe idea' })).rejects.toThrow('capability')
+    await expect(addTool.execute({ muralId: 'mural-1', agentId: 'agent-risky', agentToken: joined.structuredContent.agentToken, title: 'Unsafe idea' })).rejects.toThrow('已被讨论主持人静音')
+    await expect(addTool.execute({ muralId: 'mural-1', agentId: 'agent-risky', agentToken: 'spoofed', title: 'Unsafe idea' })).rejects.toThrow('智能体权限无效')
     expect(addElement).not.toHaveBeenCalled()
   })
 
