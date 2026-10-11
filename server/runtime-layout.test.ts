@@ -1,20 +1,41 @@
 import { expect, it } from 'vitest'
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { delimiter, dirname, join, resolve } from 'node:path'
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createServer } from 'node:net'
+import { randomUUID } from 'node:crypto'
 
 it('按生产镜像命令启动服务并提供健康检查和首页', async () => {
   const root = resolve(import.meta.dirname, '..')
   const runtime = mkdtempSync(join(tmpdir(), 'mural-runtime-layout-'))
+  const build = mkdtempSync(join(tmpdir(), 'mural-build-layout-'))
+  const proof = randomUUID()
   const dockerfile = readFileSync(join(root, 'Dockerfile'), 'utf8')
   let child: ChildProcessWithoutNullStreams | undefined
   try {
+    for (const source of ['src', 'server', 'public', 'package.json', 'package-lock.json', 'vite.config.ts', 'tsconfig.json', 'tsconfig.app.json', 'tsconfig.node.json', 'tsconfig.server.json']) {
+      cpSync(join(root, source), join(build, source), { recursive: true })
+    }
+    const sourceHtml = readFileSync(join(root, 'index.html'), 'utf8')
+    writeFileSync(join(build, 'index.html'), sourceHtml.replace('</head>', `<meta name="runtime-build-proof" content="${proof}" /></head>`))
+    mkdirSync(join(build, 'node_modules', '.tmp'), { recursive: true })
+    for (const dependency of readdirSync(join(root, 'node_modules'))) {
+      if (dependency !== '.tmp') symlinkSync(join(root, 'node_modules', dependency), join(build, 'node_modules', dependency))
+    }
+    expect(dockerfile).toContain('RUN npm run build')
+    const buildScript = (JSON.parse(readFileSync(join(build, 'package.json'), 'utf8')) as { scripts: { build: string } }).scripts.build
+    const result = spawnSync('sh', ['-c', buildScript], {
+      cwd: build,
+      encoding: 'utf8',
+      timeout: 20000,
+      env: { ...process.env, PATH: [join(build, 'node_modules', '.bin'), dirname(process.execPath), process.env.PATH ?? ''].join(delimiter) },
+    })
+    expect(result.status, result.stderr).toBe(0)
     for (const line of dockerfile.split('\n')) {
       const built = /^COPY --from=build \/app\/dist (\S+)$/.exec(line.trim())
       if (built) {
-        cpSync(join(root, 'dist'), join(runtime, built[1]), { recursive: true })
+        cpSync(join(build, 'dist'), join(runtime, built[1]), { recursive: true })
         continue
       }
       const match = /^COPY (?!--from=)(\S+) (\S+)$/.exec(line.trim())
@@ -56,7 +77,9 @@ it('按生产镜像命令启动服务并提供健康检查和首页', async () =
     const page = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(2000) })
     expect(page.status).toBe(200)
     expect(page.headers.get('content-type')).toContain('text/html')
-    expect(await page.text()).toContain('<div id="root"></div>')
+    const pageHtml = await page.text()
+    expect(pageHtml).toContain('<div id="root"></div>')
+    expect(pageHtml).toContain(proof)
   } finally {
     if (child && child.exitCode === null && child.signalCode === null) {
       await new Promise<void>((resolve) => {
@@ -66,5 +89,6 @@ it('按生产镜像命令启动服务并提供健康检查和首页', async () =
       })
     }
     rmSync(runtime, { recursive: true, force: true })
+    rmSync(build, { recursive: true, force: true })
   }
-})
+}, 30000)
