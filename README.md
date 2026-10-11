@@ -82,7 +82,25 @@ pnpm start
 | `CANVAS_RELAY_DB_PATH` | SQLite 文件位置，默认 `data/canvas-relay.sqlite` |
 | `CANVAS_RELAY_PUBLIC_URL` | 对外访问域名，用于生成协作链接 |
 
-通过反向代理把访问域名转发到应用端口，并保留 SQLite 数据目录。容器配置在 `Dockerfile` 和 `deploy/docker-compose.host.yml`；Docker 运行所需共享源码的末轮修复及验证仍在 Task 7 进行。
+通过反向代理把访问域名转发到应用端口，并保留 SQLite 数据目录。容器配置在 `Dockerfile` 和 `deploy/docker-compose.host.yml`。
+
+### 腾讯云单机部署
+
+使用一台 Ubuntu 22.04/24.04 的腾讯云 Lighthouse 或 CVM（建议至少 2 核、4GB 内存、40GB 磁盘）。SQLite 只支持单实例运行；不要用多个容器或多台服务器同时访问同一数据卷。
+
+1. 在腾讯云安全组中仅开放公网 `80`、`443`；将 `22` 限制为自己的固定 IP。
+2. 将域名 A 记录指向服务器公网 IP。
+3. 在服务器的 `/opt/aimural` 克隆仓库，将 `deploy/.env.example` 复制为 `.env`，填写真实的 DeepSeek 配置与最终 HTTPS 域名，再执行 `chmod 600 .env`。不要将本机 `.env` 上传或提交到 Git。
+4. 在 `/opt/aimural` 执行：
+
+   ```bash
+   docker compose --env-file .env -f deploy/docker-compose.host.yml up -d --build
+   ```
+
+5. 将 `deploy/nginx/aimural.conf.example` 复制到 Nginx 站点目录，替换示例域名并启用站点；先确认 HTTP 代理可用，再执行 `certbot --nginx -d 你的域名 --redirect` 签发证书并启用 HTTPS。
+6. 通过 `https://你的域名/api/health` 检查服务；返回 `{"ok":true}` 后，再从网页请求一次 AI 建议。
+
+应用容器只绑定服务器本机的 `46731` 端口，公网请求必须经 Nginx 的 80/443 端口进入。SQLite 数据保存在 Docker 命名卷 `aimural_data` 中；迁移或备份时必须一并处理数据库的 `-wal` 和 `-shm` 文件，不能只复制主数据库文件。
 
 ## 测试与常用命令
 

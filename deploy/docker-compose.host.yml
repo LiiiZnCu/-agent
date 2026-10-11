@@ -11,7 +11,10 @@ services:
       NODE_ENV: production
       CANVAS_RELAY_PORT: 5174
       CANVAS_RELAY_DB_PATH: /app/data/canvas-relay.sqlite
-      CANVAS_RELAY_PUBLIC_URL: https://aimural.300robots.com
+      CANVAS_RELAY_PUBLIC_URL: ${CANVAS_RELAY_PUBLIC_URL:?请在 .env 中填写 HTTPS 访问地址}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?请在 .env 中填写 DeepSeek 密钥}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:?请在 .env 中填写已开通的 DeepSeek 模型}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
     ports:
       - "127.0.0.1:${AIMURAL_HOST_PORT:-46731}:5174"
     volumes:

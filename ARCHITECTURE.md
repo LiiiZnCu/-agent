@@ -39,7 +39,8 @@
 | `public/artifact-spec.schema.json` | 提供结构化白板内容的 JSON Schema。 |
 | `vite.config.ts` | 构建前端，并在开发时将 API 请求转发到本地服务端。 |
 | `package.json` | 定义本地启动命令；服务端启动时自动读取项目根目录的 `.env`。 |
-| `Dockerfile`、`deploy/docker-compose.host.yml` | 定义容器运行环境、服务端入口和持久化数据卷。 |
+| `Dockerfile`、`deploy/docker-compose.host.yml` | 定义单实例容器运行环境、服务端入口、显式 DeepSeek 配置和持久化数据卷。 |
+| `deploy/.env.example`、`deploy/nginx/aimural.conf.example` | 提供腾讯云服务器的非敏感环境变量样例与 HTTPS 反向代理样例。 |
 | `*.test.ts`、`*.test.tsx` | 验证领域、界面、存储、授权、建议和运行布局，测试样本只存在于这些文件中。 |
 
 ## 模块调用关系
@@ -99,6 +100,8 @@ SQLite 的 `brainstorm_sessions` 表保存白板与讨论 JSON，原有 `murals`
 | 草稿生成保留人工最终选择与行动安排 | 接受 AI 建议不会代替成员确认结果。 |
 | 记录使用参与者明确输入的身份 | 不把默认昵称或默认主持人当成真实成员。 |
 | 容器必须携带服务端共享校验的完整源码依赖 | 服务端运行时调用 `brainstorm-validation → board-validation → artifacts`，仅复制类型或前端产物不足以启动。 |
+| 腾讯云仅使用单实例 Docker Compose | SQLite 使用本地持久化卷，多个应用实例会破坏单机存储边界。 |
+| 服务器通过 `.env` 显式注入 DeepSeek 配置 | 密钥不进入镜像或 Git；缺少密钥、模型或公开 HTTPS 域名时容器启动前直接失败。 |
 
 ## 当前收尾状态
 
