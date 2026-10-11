@@ -19,6 +19,18 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('讨论入口', () => {
+  it.each(['Add idea', 'Add question', 'Add insight', 'Add action', 'Add frame'])('无讨论的普通白板点击 %s 仍创建空白内容', async (label) => {
+    const board = createEmptyBoard('旧白板')
+    saveBoard(board)
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: label }))
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem(`canvas-relay-board-v2:${board.id}`) || 'null')
+      expect(stored.nodes).toHaveLength(1)
+      expect(stored.nodes[0].data.title).toBe('')
+      expect(stored.nodes[0].data.body).toBe('')
+    })
+  })
   it('代理明确创建托管白板时以真实代理身份开始记录', async () => {
     const tools: Array<{ name: string; execute: (input: Record<string, unknown>) => Promise<{ structuredContent: { session: { moderatorId: string; participants: Array<{ id: string }> } } }> }> = []
     Object.defineProperty(document, 'modelContext', { configurable: true, value: { registerTool: (tool: typeof tools[number]) => tools.push(tool) } })

@@ -87,7 +87,7 @@ export function getSession(id: string): StoredSession | null {
   const stored = db.select().from(sessions).where(eq(sessions.id, id)).get()
   if (!stored) return null
   const storedParticipants = db.select().from(participants).where(eq(participants.sessionId, id)).orderBy(asc(participants.sequence)).all()
-  const moderatorId = stored.moderatorId ?? storedParticipants[0]?.id
+  const moderatorId = stored.moderatorId
   if (!moderatorId || !storedParticipants.some((participant) => participant.id === moderatorId)) return null
   const storedEvents = db.select().from(events).where(eq(events.sessionId, id)).orderBy(asc(events.sequence)).all()
 

@@ -116,6 +116,11 @@ if (!participantColumns.some((column) => column.name === 'focus_json')) sqlite.e
 const sessionColumns = sqlite.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>
 if (!sessionColumns.some((column) => column.name === 'board_id')) sqlite.exec('ALTER TABLE sessions ADD COLUMN board_id TEXT')
 if (!sessionColumns.some((column) => column.name === 'moderator_id')) sqlite.exec('ALTER TABLE sessions ADD COLUMN moderator_id TEXT')
+sqlite.exec(`UPDATE sessions SET moderator_id = (
+  SELECT id FROM participants WHERE session_id = sessions.id ORDER BY sequence, rowid LIMIT 1
+) WHERE moderator_id IS NULL AND EXISTS (
+  SELECT 1 FROM participants WHERE session_id = sessions.id
+)`)
 
 const eventColumns = sqlite.prepare('PRAGMA table_info(events)').all() as Array<{ name: string }>
 if (!eventColumns.some((column) => column.name === 'checkpoint_json')) sqlite.exec('ALTER TABLE events ADD COLUMN checkpoint_json TEXT')

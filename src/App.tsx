@@ -1300,11 +1300,8 @@ function Workspace() {
   }, [connectElements])
 
   const addKind = useCallback((kind: ElementKind) => {
-    const names: Record<ElementKind, string> = {
-      idea: 'New idea', question: 'What should we explore?', insight: 'New insight', action: 'Next action', frame: 'New cluster', artifact: 'New artifact',
-    }
-    addElement({ title: session ? '' : names[kind], kind })
-  }, [addElement, session])
+    addElement({ title: '', kind })
+  }, [addElement])
 
   const addIdea = useCallback((type: IdeaType) => {
     addElement({ title: '', kind: type === 'question' ? 'question' : type === 'evidence' ? 'insight' : 'idea', ideaType: type })
