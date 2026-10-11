@@ -54,10 +54,10 @@ pnpm dev
 ## DeepSeek 服务端配置
 
 ```bash
-cp .env.example .env.local
+cp .env.example .env
 ```
 
-在 `.env.local` 中填写自己的密钥和模型名称。该文件已由 `*.local` 规则排除出 Git；示例文件没有真实密钥。
+在 `.env` 中填写自己的密钥和模型名称。该文件已排除出 Git；示例文件没有真实密钥。
 
 | 变量 | 要求 |
 | --- | --- |
@@ -65,16 +65,7 @@ cp .env.example .env.local
 | `DEEPSEEK_MODEL` | 必填，填写账户可用的模型名称；没有默认替代模型 |
 | `DEEPSEEK_BASE_URL` | 可选，默认 `https://api.deepseek.com`；可使用兼容服务的基础地址 |
 
-环境文件需要显式加载到启动进程。macOS/Linux 可以在同一个终端中运行：
-
-```bash
-set -a
-. ./.env.local
-set +a
-pnpm dev
-```
-
-其他环境可通过进程管理器或终端设置相同变量。不要将密钥写进浏览器代码或以 `VITE_` 命名。没有 Key、缺少或错误的模型配置、上游 HTTP 错误、非 JSON 内容和非法动作都会明确报错。
+`pnpm dev`、`pnpm dev:server` 和 `pnpm start` 会在本地自动读取 `.env`。部署环境请通过进程管理器或容器环境变量提供同名变量。不要将密钥写进浏览器代码或以 `VITE_` 命名。没有 Key、缺少或错误的模型配置、上游 HTTP 错误、非 JSON 内容和非法动作都会明确报错。
 
 ## 构建与部署
 
@@ -129,8 +120,8 @@ React 和 TypeScript 管理讨论界面，React Flow 显示白板。`src/App.tsx
 | Task 3：localStorage 与 SQLite 讨论持久化 | 已完成 |
 | Task 4：DeepSeek 服务端适配与严格校验 | 已完成 |
 | Task 5：建议展示、确认、编辑、忽略、暂停和撤销 | 已完成 |
-| Task 6：文档 | 已更新；最终测试和源码审查待主任务完成 |
-| Task 7：末轮修复 | Docker 源码运行依赖和默认成员行为正在修复 |
+| Task 6：文档 | 已完成 |
+| Task 7：末轮修复 | 已完成：Docker 运行依赖、默认成员、中文界面与本地环境加载均已核验 |
 
 进度与关键决定见 [CONTEXT.md](./CONTEXT.md)，实施步骤见 [实施计划](./docs/superpowers/plans/2026-10-10-multiplayer-brainstorm-agent.md)。
 
