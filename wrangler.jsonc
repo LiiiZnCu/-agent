@@ -11,7 +11,7 @@
     {
       "binding": "DB",
       "database_name": "aimural-brainstorm",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "441a8d75-3186-44a7-9448-052d37351d17",
       "migrations_dir": "./migrations"
     }
   ],

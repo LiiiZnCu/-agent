@@ -93,3 +93,7 @@ pnpm deploy
 ```
 
 本机 `data/canvas-relay.sqlite`、`-wal`、`-shm` 持续保留，除非另行确认备份和删除方案。
+
+## 当前发布状态
+
+Worker 已发布到 `https://aimural-brainstorm.3414887923-35c.workers.dev`。当前验证网络无法与该 `workers.dev` 地址建立 HTTPS 连接，需换网络复核，或后续绑定自有域名。

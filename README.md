@@ -152,7 +152,7 @@ React 和 TypeScript 管理讨论界面，React Flow 显示白板。`src/App.tsx
 | D1 七张表与讨论/记录/托管存储 | 已完成，Worker 测试通过 |
 | Worker API、DeepSeek 严格校验与导出 | 已完成，Worker 测试通过 |
 | 本机 SQLite 只读导出 | 已完成，当前导出 2 条讨论、其余表 0 条 |
-| Cloudflare 远端发布 | 待用户账号授权、替换 D1 ID、写入 secret 后执行 |
+| Cloudflare 远端发布 | 已完成，地址为 `https://aimural-brainstorm.3414887923-35c.workers.dev`；当前网络对 workers.dev 的 HTTPS 检查失败 |
 
 进度与关键决定见 [CONTEXT.md](./CONTEXT.md)，实施步骤见 [Cloudflare 实施计划](./docs/superpowers/plans/2026-10-12-cloudflare-workers-d1-migration.md)。
 
