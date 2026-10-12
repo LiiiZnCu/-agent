@@ -15,7 +15,11 @@
     "test:ui": "vitest run --config vitest.ui.config.ts",
     "test:worker": "vitest run --config vitest.worker.config.ts",
     "test:node": "vitest run --config vitest.node.config.ts",
-    "export:d1-data": "tsx scripts/export-local-sqlite-data.mts"
+    "export:d1-data": "tsx scripts/export-local-sqlite-data.mts",
+    "db:migrate:local": "wrangler d1 migrations apply aimural-brainstorm --local",
+    "db:migrate:remote": "wrangler d1 migrations apply aimural-brainstorm --remote",
+    "deploy": "wrangler deploy",
+    "smoke:worker": "tsx scripts/smoke-worker.mts"
   },
   "dependencies": {
     "@fontsource-variable/jetbrains-mono": "^5.3.0",

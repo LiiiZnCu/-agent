@@ -16,6 +16,7 @@ data/*.sqlite
 data/*.sqlite-shm
 data/*.sqlite-wal
 .work/
+.wrangler/
 
 # Editor directories and files
 .vscode/*

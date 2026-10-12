@@ -42,14 +42,14 @@ AI-Mural 是一个通用的多人协作头脑风暴 Agent。成员在同一块�
 
 ## 本地运行
 
-使用 Node.js 24 和 pnpm。
+使用 Node.js 24 和 pnpm。公开运行目标是 Cloudflare Worker + D1。
 
 ```bash
 pnpm install
 pnpm dev
 ```
 
-`pnpm dev` 同时启动前端和 API。打开 Vite 输出的地址，通常为 `http://localhost:5173`；API 默认在 `http://localhost:5174`，开发环境将 `/api` 转发到该地址。
+`pnpm dev` 启动 Cloudflare Vite 开发环境，网页和 `/api` 使用同一个本地 Worker 地址。旧 Express 服务仍可用 `pnpm dev:server` 单独回归，但不是新的发布入口。
 
 ## DeepSeek 服务端配置
 
@@ -57,7 +57,7 @@ pnpm dev
 cp .env.example .env
 ```
 
-在 `.env` 中填写自己的密钥和模型名称。该文件已排除出 Git；示例文件没有真实密钥。
+本地 Worker 使用未提交的 `.dev.vars` 或 `.env`；在 Cloudflare 上使用 Worker secret。两个文件都已排除出 Git；示例文件没有真实密钥。
 
 | 变量 | 要求 |
 | --- | --- |
@@ -65,16 +65,21 @@ cp .env.example .env
 | `DEEPSEEK_MODEL` | 必填，填写账户可用的模型名称；没有默认替代模型 |
 | `DEEPSEEK_BASE_URL` | 可选，默认 `https://api.deepseek.com`；可使用兼容服务的基础地址 |
 
-`pnpm dev`、`pnpm dev:server` 和 `pnpm start` 会在本地自动读取 `.env`。部署环境请通过进程管理器或容器环境变量提供同名变量。不要将密钥写进浏览器代码或以 `VITE_` 命名。没有 Key、缺少或错误的模型配置、上游 HTTP 错误、非 JSON 内容和非法动作都会明确报错。
+旧 Express 的 `pnpm dev:server` 和 `pnpm start` 会读取 `.env`；Cloudflare Worker 的发布密钥通过 `wrangler secret put DEEPSEEK_API_KEY` 写入。不要将密钥写进浏览器代码或以 `VITE_` 命名。没有 Key、缺少或错误的模型配置、上游 HTTP 错误、非 JSON 内容和非法动作都会明确报错。
 
 ## 构建与部署
 
+> 当前正在迁移至 Cloudflare Workers + D1，设计见 `docs/superpowers/specs/2026-10-12-cloudflare-workers-d1-migration-design.md`。以下腾讯云步骤仅适用于迁移前的 Express + SQLite 版本，不作为新的上线方案。
+
+当前部署方式、迁移顺序和远端核对命令见 [Cloudflare 部署手册](./docs/cloudflare-deploy.md)。核心命令：
+
 ```bash
 pnpm build
-pnpm start
+pnpm db:migrate:remote
+pnpm deploy
 ```
 
-启动前将服务端环境变量加载到进程。Express 同时提供 `dist/` 中的前端页面和 `/api` 接口，默认监听 5174 端口；部署需保留服务端及其引用的 `src/lib` 共享校验源码，不能只上传 `dist/`。
+部署前必须把 `wrangler.jsonc` 中的 D1 占位 ID 换成真实 ID，并先完成 Cloudflare 登录、数据导入和 Worker secret 配置。旧 Express 配置只用于迁移前回归，不作为线上方案。
 
 | 变量 | 作用 |
 | --- | --- |
@@ -84,7 +89,9 @@ pnpm start
 
 通过反向代理把访问域名转发到应用端口，并保留 SQLite 数据目录。容器配置在 `Dockerfile` 和 `deploy/docker-compose.host.yml`。
 
-### 腾讯云单机部署
+### 腾讯云单机部署（迁移前留档）
+
+以下步骤只保留给仍需运行旧 Express + SQLite 的场景；新部署不要再按此方案开服务器。
 
 使用一台 Ubuntu 22.04/24.04 的腾讯云 Lighthouse 或 CVM（建议至少 2 核、4GB 内存、40GB 磁盘）。SQLite 只支持单实例运行；不要用多个容器或多台服务器同时访问同一数据卷。
 
@@ -106,20 +113,25 @@ pnpm start
 
 | 命令 | 用途 |
 | --- | --- |
-| `pnpm test` | 运行领域、组件、持久化、建议校验和 HTTP 接口测试 |
-| `pnpm build` | 检查 TypeScript 并构建前端 |
+| `pnpm test` | 运行界面测试和 Worker/D1 测试 |
+| `pnpm run test:node` | 运行旧 Express/SQLite 与导出工具测试 |
+| `pnpm build` | 检查 TypeScript 并构建 Worker 与前端 |
+| `pnpm smoke:worker` | 检查本地或远端 Worker 的健康接口、首页和深层链接 |
+| `pnpm export:d1-data data/canvas-relay.sqlite .work/aimural-d1-data.sql` | 只读导出本机 SQLite 数据 |
+| `pnpm db:migrate:local` | 应用本地 D1 迁移 |
+| `pnpm db:migrate:remote` | 应用远端 D1 迁移 |
+| `pnpm deploy` | 发布 Worker 和静态资源 |
 | `pnpm lint` | 检查源码 |
-| `pnpm dev:web` | 单独启动前端 |
-| `pnpm dev:server` | 单独启动 API |
-| `pnpm preview` | 预览构建后的前端，API 需单独运行 |
+| `pnpm dev:server` | 单独启动旧 Express API，迁移回归用 |
+| `pnpm preview` | 预览构建后的 Worker 与静态资源 |
 
-HTTP 接口测试需要绑定本机端口。测试样本只放在测试文件中；测试不会使用真实 DeepSeek Key。
+Worker 测试使用本地隔离 D1；旧 Node 测试仍使用临时 SQLite。迁移前的 Docker/Express 运行布局测试保留在 `server/runtime-layout.test.ts`，不纳入新的 Worker 发布回归。测试样本只放在测试文件中；测试不会请求真实 DeepSeek。
 
 ## 技术架构
 
-React 和 TypeScript 管理讨论界面，React Flow 显示白板。`src/App.tsx` 统一画布与讨论操作及历史；`src/lib` 提供领域模型、校验、建议执行和本地保存。Express 提供 API，通过 Drizzle 读写 SQLite，并用服务端原生 fetch 调用 DeepSeek。模块职责和调用关系见 [ARCHITECTURE.md](./ARCHITECTURE.md)。
+React 和 TypeScript 管理讨论界面，React Flow 显示白板。`src/App.tsx` 统一画布与讨论操作及历史；`src/lib` 提供领域模型、校验、建议执行和本地保存。Cloudflare Worker 提供同源 API，通过 Drizzle D1 读写七张业务表，并用 Worker 原生 fetch 调用 DeepSeek；旧 Express + SQLite 只作迁移回归。模块职责和调用关系见 [ARCHITECTURE.md](./ARCHITECTURE.md)。
 
-浏览器先保存本地快照，托管协作通过 API 同步。讨论使用独立的 `brainstorm_sessions` 表，保留原有白板和记录表。分享链接携带访问能力，托管讨论读写和 AI 请求都必须通过同一能力检查。
+浏览器先保存本地快照，托管协作通过 Worker API 同步。D1 的 `brainstorm_sessions` 表保留两条本机已有讨论，其他白板和记录表继续使用原协议。分享链接携带访问能力，托管讨论读写和 AI 请求都必须通过同一能力检查。
 
 ## 搜索记录
 
@@ -128,20 +140,21 @@ React 和 TypeScript 管理讨论界面，React Flow 显示白板。`src/App.tsx
 | [skills.sh：brainstorm](https://www.skills.sh/shhac/skills/brainstorm) | 明确目标和限制，先发散再收敛，由参与者选择方案 | 不把通用提问流程变成强制阶段锁定或自动决策 |
 | [Iamwangli/agent-canvas](https://github.com/Iamwangli/agent-canvas) | React Flow 的关系表达、来源追溯和多成员思考上下文 | 不迁移整套产品，不采用模型自动分支或自动创建节点 |
 | [nicklyuu/ai-whiteboard](https://github.com/nicklyuu/ai-whiteboard) | 白板与侧栏共同工作，使用当前画布构成 AI 上下文 | 不采用自动清空白板、跳过人工确认执行或清洗猜测错误 JSON |
+| [Cloudflare React + Vite 官方模板](https://github.com/cloudflare/templates/tree/main/templates/react-starter-template) 与 [Workers Vite 插件](https://developers.cloudflare.com/workers/vite-plugin/tutorial/) | 单个 Worker 同时提供 React 静态资源和同源 API，适配现有 Vite 项目 | 不拆分为 Pages 前端和独立 API，避免跨域与双部署 |
+| [Cloudflare D1 导入导出](https://developers.cloudflare.com/d1/best-practices/import-export-data/) | 本机 SQLite 先转 SQL 再导入 D1，并在迁移后核对数据 | 不直接上传原始 SQLite 文件，也不删除本机数据库 |
 
 ## 已完成与待办
 
 | 项目 | 当前状态 |
 | --- | --- |
-| Task 1：空白讨论和领域模型 | 已完成 |
-| Task 2：人工工作区、阶段、成员、方案、决策与成果 | 已完成 |
-| Task 3：localStorage 与 SQLite 讨论持久化 | 已完成 |
-| Task 4：DeepSeek 服务端适配与严格校验 | 已完成 |
-| Task 5：建议展示、确认、编辑、忽略、暂停和撤销 | 已完成 |
-| Task 6：文档 | 已完成 |
-| Task 7：末轮修复 | 已完成：Docker 运行依赖、默认成员、中文界面与本地环境加载均已核验 |
+| 原有头脑风暴、协作和记录功能 | 已完成并保留 |
+| Cloudflare Worker 基础运行环境 | 已完成，本地健康检查和 SPA 回退通过 |
+| D1 七张表与讨论/记录/托管存储 | 已完成，Worker 测试通过 |
+| Worker API、DeepSeek 严格校验与导出 | 已完成，Worker 测试通过 |
+| 本机 SQLite 只读导出 | 已完成，当前导出 2 条讨论、其余表 0 条 |
+| Cloudflare 远端发布 | 待用户账号授权、替换 D1 ID、写入 secret 后执行 |
 
-进度与关键决定见 [CONTEXT.md](./CONTEXT.md)，实施步骤见 [实施计划](./docs/superpowers/plans/2026-10-10-multiplayer-brainstorm-agent.md)。
+进度与关键决定见 [CONTEXT.md](./CONTEXT.md)，实施步骤见 [Cloudflare 实施计划](./docs/superpowers/plans/2026-10-12-cloudflare-workers-d1-migration.md)。
 
 ## 许可
 

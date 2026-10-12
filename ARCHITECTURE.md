@@ -1,5 +1,7 @@
 # AI-Mural 架构
 
+当前线上目标是一个 Cloudflare Worker + D1：Worker 同时提供 React 静态资源和 `/api`，D1 保存讨论、托管白板与记录。`server/` 目录仍保留作迁移前回归参考，线上 Worker 不会加载它。
+
 ## 模块职责
 
 | 文件或模块 | 职责 |
@@ -36,8 +38,21 @@
 | `server/hosted.ts` | 管理托管白板、访问能力、邀请、协作合并和焦点租约。 |
 | `server/store.ts`、`export.ts` | 保存原有讨论记录，并生成记录导出内容。 |
 | `server/db.ts`、`schema.ts` | 初始化 SQLite 与 Drizzle 表结构并提供数据库连接。 |
+| `worker/index.ts` | 导出 Cloudflare Worker 的 `fetch` 入口。 |
+| `worker/app.ts` | 处理健康检查、讨论、托管白板、记录、建议和导出 API；其他请求交给 `ASSETS`。 |
+| `worker/env.ts` | 定义 D1、静态资源和 DeepSeek 环境绑定。 |
+| `worker/schema.ts`、`worker/db.ts` | 描述七张 D1 表并构造 Drizzle D1 数据库。 |
+| `worker/brainstorm-store.ts` | 异步保存讨论快照并拒绝过期或跨白板覆盖。 |
+| `worker/recording-store.ts` | 用 D1 批处理保存、读取、删除活动记录。 |
+| `worker/hosted-store.ts`、`worker/crypto.ts` | 管理托管白板、访问能力、邀请、焦点租约和 Web Crypto 令牌。 |
+| `worker/agent-actions.ts`、`worker/deepseek.ts` | 严格校验建议请求和 DeepSeek JSON 响应。 |
+| `worker/export.ts` | 生成记录 JSON、Markdown 和 CSV 内容。 |
+| `migrations/0001_initial_schema.sql` | 一次建立 D1 的七张业务表和索引。 |
+| `scripts/export-local-sqlite-data.mts` | 只读导出本机 SQLite 数据为 D1 可执行 INSERT SQL。 |
+| `scripts/smoke-worker.mts` | 检查 Worker 健康接口、首页和深层链接回退。 |
+| `vitest.ui.config.ts`、`vitest.worker.config.ts`、`vitest.node.config.ts` | 分开运行界面、Worker/D1 和旧 Node 服务测试，避免 Cloudflare 插件相互污染。 |
 | `public/artifact-spec.schema.json` | 提供结构化白板内容的 JSON Schema。 |
-| `vite.config.ts` | 构建前端，并在开发时将 API 请求转发到本地服务端。 |
+| `vite.config.ts` | 用 React 与 Cloudflare Vite 插件构建同源 Worker 和静态资源。 |
 | `package.json` | 定义本地启动命令；服务端启动时自动读取项目根目录的 `.env`。 |
 | `Dockerfile`、`deploy/docker-compose.host.yml` | 定义单实例容器运行环境、服务端入口、显式 DeepSeek 配置和持久化数据卷。 |
 | `deploy/.env.example`、`deploy/nginx/aimural.conf.example` | 提供腾讯云服务器的非敏感环境变量样例与 HTTPS 反向代理样例。 |
@@ -49,9 +64,9 @@
 flowchart TD
   Input["成员输入与阶段导航"] --> App["App：白板与讨论状态"]
   App --> Local["brainstorm-storage / storage：localStorage"]
-  App --> API["lib/api → server/index"]
-  API --> Store["brainstorm-store / hosted / store：SQLite"]
-  API --> Model["deepseek：当前讨论与白板上下文"]
+  App --> API["lib/api → worker/app"]
+  API --> Store["worker stores → D1"]
+  API --> Model["worker/deepseek：当前讨论与白板上下文"]
   Model --> Check["agent-actions → brainstorm-validation"]
   Check --> Pending["前端待确认建议"]
   Pending --> Human["成员确认"]
@@ -63,8 +78,8 @@ flowchart TD
 | --- | --- |
 | 创建与人工编辑 | `App` 使用领域函数更新讨论，通过统一动作层修改画布，并把两者放入同一笔历史。 |
 | 本地保存 | `brainstorm-storage` 先验证快照，再调用 `storage` 将白板与讨论一次性写入 localStorage。 |
-| 服务端保存 | `api` 发送当前版本，`server/index` 验证内容和能力，`brainstorm-store` 拒绝旧写入后保存 JSON。 |
-| 请求 AI | `App` 先同步当前真实内容，建议路由读取已保存讨论及当前托管白板，`deepseek` 请求模型后交给共享校验。 |
+| 服务端保存 | `api` 发送当前版本，`worker/app` 验证内容和能力，D1 讨论存储拒绝旧写入后保存 JSON。 |
+| 请求 AI | `App` 先同步当前真实内容，Worker 建议路由读取已保存讨论及当前托管白板，`deepseek` 请求模型后交给共享校验。 |
 | 接受建议 | 前端再次验证上下文和动作，`brainstorm-actions` 调用 `createCluster`、`connectElements`、`addElement`、`createArtifact` 等已有操作，或更新成果草稿。 |
 | 撤销建议 | 接受前后快照记录变化；撤销检查后续编辑冲突，再更新白板、讨论和普通撤销历史。 |
 | 成果导出 | `OutcomeEditor` 使用 `isOutcomeConfirmed` 检查人工确认，原始白板 JSON 由已有白板导出入口处理。 |
@@ -73,7 +88,7 @@ flowchart TD
 
 白板的 `ideaMeta` 保存讨论 ID、作者 ID、类型、创建时间、来源观点 ID 和版本。候选方案保留来源观点与分类评论；决策保存成员评分理由和投票；成果保存草稿、最终方案及行动安排。建议另存阶段、状态、请求上下文和接受前后快照。
 
-SQLite 的 `brainstorm_sessions` 表保存白板与讨论 JSON，原有 `murals` 和记录相关表继续使用。localStorage 的键名与数据库默认文件名保留现有值，以兼容已有数据。
+D1 的 `brainstorm_sessions` 表保存白板与讨论 JSON，原有 `murals` 和记录相关表继续使用。localStorage 的键名保留现有值；本机 SQLite 只作为迁移前数据源。
 
 | 接口 | 职责 |
 | --- | --- |
@@ -100,9 +115,9 @@ SQLite 的 `brainstorm_sessions` 表保存白板与讨论 JSON，原有 `murals`
 | 草稿生成保留人工最终选择与行动安排 | 接受 AI 建议不会代替成员确认结果。 |
 | 记录使用参与者明确输入的身份 | 不把默认昵称或默认主持人当成真实成员。 |
 | 容器必须携带服务端共享校验的完整源码依赖 | 服务端运行时调用 `brainstorm-validation → board-validation → artifacts`，仅复制类型或前端产物不足以启动。 |
-| 腾讯云仅使用单实例 Docker Compose | SQLite 使用本地持久化卷，多个应用实例会破坏单机存储边界。 |
+| 公开部署采用单个 Worker + D1 | 同源页面和 API，不需要常驻服务器，也避免 SQLite 多实例边界。 |
 | 服务器通过 `.env` 显式注入 DeepSeek 配置 | 密钥不进入镜像或 Git；缺少密钥、模型或公开 HTTPS 域名时容器启动前直接失败。 |
 
 ## 当前收尾状态
 
-Task 1 至 Task 7 已完成。Docker 运行依赖、默认成员、中文界面和本地 DeepSeek 环境加载均已核验；完整测试通过 305 项，构建通过，真实模型调用通过严格校验后返回建议。
+Cloudflare 迁移代码、D1 迁移、导出工具和本地 Worker 冒烟检查已完成。远端 D1 创建、真实 ID 写回、数据导入、Cloudflare 登录、secret 写入和正式发布仍需在用户账号授权后执行。
