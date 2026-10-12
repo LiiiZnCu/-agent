@@ -1,0 +1,4 @@
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
+  workerd: set this to true or false
