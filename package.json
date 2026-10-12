@@ -13,7 +13,9 @@
     "preview": "vite preview",
     "test": "pnpm run test:ui && pnpm run test:worker",
     "test:ui": "vitest run --config vitest.ui.config.ts",
-    "test:worker": "vitest run --config vitest.worker.config.ts"
+    "test:worker": "vitest run --config vitest.worker.config.ts",
+    "test:node": "vitest run --config vitest.node.config.ts",
+    "export:d1-data": "tsx scripts/export-local-sqlite-data.mts"
   },
   "dependencies": {
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
