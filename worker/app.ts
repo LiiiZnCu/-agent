@@ -3,6 +3,12 @@ import type { BoardSnapshot, RecordingParticipant, RecordingSession } from '../s
 import { createDatabase } from './db'
 import { createHostedStore, type HostedGuest } from './hosted-store'
 import { createRecordingStore } from './recording-store'
+import { BrainstormWriteConflictError, createBrainstormStore } from './brainstorm-store'
+import { validateBrainstormPayload, type StoredBrainstorm } from '../src/lib/brainstorm-validation'
+import { isSnapshot } from '../src/lib/board-validation'
+import { AgentValidationError, validateSuggestionRequest } from './agent-actions'
+import { DeepSeekError, requestDeepSeekSuggestions } from './deepseek'
+import { toCsv, toMarkdown } from './export'
 
 function bearer(request: Request): string {
   const header = request.headers.get('authorization') ?? ''
@@ -19,6 +25,15 @@ function errorResponse(error: unknown, fallback: string, status: number): Respon
 }
 
 export async function handleRequest(request: Request, env: Env): Promise<Response> {
+  try {
+    return await routeRequest(request, env)
+  } catch (error) {
+    if (new URL(request.url).pathname.startsWith('/api/')) return errorResponse(error, 'Unexpected server error.', 500)
+    throw error
+  }
+}
+
+async function routeRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url)
   const path = url.pathname
 
@@ -31,7 +46,65 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   const db = createDatabase(env.DB)
   const hosted = createHostedStore(db)
   const recordings = createRecordingStore(db)
+  const brainstorms = createBrainstormStore(db)
   const segments = path.split('/').filter(Boolean)
+
+  if (segments[1] === 'brainstorm' && segments[2]) {
+    const discussionId = segments[2]
+    if (segments.length === 3 && request.method === 'GET') {
+      const stored = await brainstorms.get(discussionId)
+      if (!stored) return Response.json({ error: '讨论不存在。' }, { status: 404 })
+      try { await hosted.authorize(stored.board.id, bearer(request)) }
+      catch { return Response.json({ error: '没有访问此讨论的权限。' }, { status: 403 }) }
+      return Response.json(stored)
+    }
+    if (segments.length === 3 && request.method === 'PUT') {
+      let payload: StoredBrainstorm
+      try { payload = validateBrainstormPayload(await request.json(), discussionId) }
+      catch (error) { return errorResponse(error, '讨论数据无效。', 400) }
+      const existing = await brainstorms.get(discussionId)
+      if (existing && existing.board.id !== payload.board.id) return Response.json({ error: '讨论不能迁移到另一个白板。' }, { status: 409 })
+      try { await hosted.authorize(payload.board.id, bearer(request)) }
+      catch { return Response.json({ error: '没有保存此讨论的权限。' }, { status: 403 }) }
+      try {
+        await brainstorms.save(payload)
+        return Response.json({ ok: true, sessionId: payload.session.id, updatedAt: payload.board.updatedAt })
+      } catch (error) {
+        if (error instanceof BrainstormWriteConflictError) return Response.json({ error: error.message }, { status: 409 })
+        throw error
+      }
+    }
+    if (segments.length === 4 && segments[3] === 'suggestions' && request.method === 'POST') {
+      const stored = await brainstorms.get(discussionId)
+      if (!stored) return Response.json({ error: '讨论不存在。' }, { status: 404 })
+      try { await hosted.authorize(stored.board.id, bearer(request)) }
+      catch { return Response.json({ error: '没有访问此讨论的权限。' }, { status: 403 }) }
+      let context: StoredBrainstorm = stored
+      const mural = await hosted.getMural(stored.board.id, bearer(request))
+      if (mural) {
+        if (!isSnapshot(mural.board) || mural.board.id !== stored.session.boardId) return errorResponse(new AgentValidationError('当前讨论的白板数据无效。'), '', 422)
+        context = { session: stored.session, board: mural.board }
+      }
+      let intent
+      try { intent = validateSuggestionRequest(await request.json(), context.board, stored.session) }
+      catch (error) { return errorResponse(error, '建议请求无效。', 400) }
+      try {
+        const suggestion = await requestDeepSeekSuggestions(context, intent, env)
+        try { await hosted.authorize(stored.board.id, bearer(request)) }
+        catch { return Response.json({ error: '没有访问此讨论的权限。' }, { status: 403 }) }
+        const current = await brainstorms.get(discussionId)
+        if (!current) return Response.json({ error: '讨论已变化，请重新请求建议。' }, { status: 409 })
+        const currentMural = await hosted.getMural(current.board.id, bearer(request))
+        const currentContext = currentMural ? { session: current.session, board: currentMural.board } : current
+        if (JSON.stringify(currentContext) !== JSON.stringify(context)) return Response.json({ error: '讨论已变化，请重新请求建议。' }, { status: 409 })
+        return Response.json(suggestion)
+      } catch (error) {
+        if (error instanceof DeepSeekError) return errorResponse(error, error.message, error.status)
+        if (error instanceof AgentValidationError) return errorResponse(error, error.message, 422)
+        throw error
+      }
+    }
+  }
 
   if (segments[1] === 'murals' && segments.length === 2 && request.method === 'POST') {
     try {
@@ -152,6 +225,20 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       }
       await recordings.delete(sessionId)
       return new Response(null, { status: 204 })
+    }
+    if (segments.length === 4 && segments[3] === 'export' && request.method === 'GET') {
+      const stored = await recordings.get(sessionId)
+      if (!stored) return Response.json({ error: 'Session not found.' }, { status: 404 })
+      try {
+        if (stored.session.boardId && !(await hosted.authorize(stored.session.boardId, bearer(request)))) return Response.json({ error: 'Session access denied.' }, { status: 403 })
+      } catch {
+        return Response.json({ error: 'Session access denied.' }, { status: 403 })
+      }
+      const safeName = stored.session.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'decision-trace'
+      const format = url.searchParams.get('format')
+      if (format === 'markdown') return new Response(toMarkdown(stored), { headers: { 'Content-Type': 'text/markdown; charset=utf-8', 'Content-Disposition': `attachment; filename="${safeName}.md"` } })
+      if (format === 'csv') return new Response(toCsv(stored), { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${safeName}.csv"` } })
+      return new Response(JSON.stringify({ schemaVersion: '1.0', ...stored }, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="${safeName}.json"` } })
     }
   }
 
